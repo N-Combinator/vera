@@ -30,49 +30,36 @@ Vera (Verify & Access) is an open-source, AI-powered tool that automates accessi
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   vera CLI (Node.js)                │
-│                                                     │
-│  vera init  →  vera scan  →  vera fix  →  vera ui  │
-│                     │              │                 │
-│              HTTP Client     HTTP Client             │
-└──────────────────────┬──────────────┬───────────────┘
-                       │              │
-                       ▼              ▼
-┌─────────────────────────────────────────────────────┐
-│             Vera Backend (Python FastAPI)            │
-│                                                     │
-│  POST /scan ──► Scanner ──► Heuristics + LLM        │
-│  POST /fix  ──► CodeFixer ──► AST/regex patches     │
-│  GET  /health                                       │
-│                                                     │
-│  ┌─────────────────┐   ┌──────────────────────┐    │
-│  │  LLM Bridge     │   │  Code Fixer          │    │
-│  │  - Ollama       │   │  - Rule-based fixes  │    │
-│  │  - OpenAI       │   │  - LLM fallback      │    │
-│  │  - Anthropic    │   │  - Diff generation   │    │
-│  │  - OpenRouter   │   └──────────────────────┘    │
-│  └─────────────────┘                               │
-└──────────────────────┬──────────────────────────────┘
-                       │ (optional)
+┌──────────────────────────────────────────────────────────────────┐
+│                    vera CLI (Node.js)                            │
+│                                                                  │
+│  vera init  →  vera scan  →  vera fix  →  vera ui               │
+│                     │             │                              │
+│             HTTP Client    HTTP Client                           │
+└──────────────────────┬────────────┬──────────────────────────────┘
+                       │            │
+                       ▼            ▼
+┌──────────────────────────────────────────────────────────────────┐
+│         Vera Backend (Python FastAPI + LLM Bridge)               │
+│                                                                  │
+│  POST /scan  ──► Scanner (Heuristics + LLM)                     │
+│  POST /fix   ──► CodeFixer (AST patching + LLM)                 │
+│  GET /health                                                    │
+│                                                                  │
+│  LLM Routing (configured in .verarc.json):                       │
+│  • Ollama (Llama 3)       ← local, private                       │
+│  • OpenAI (GPT-4o)        ← cloud recommended                    │
+│  • Anthropic (Claude)     ← cloud fallback                       │
+│  • OpenRouter             ← aggregator                           │
+└──────────────────────┬────────────────────────────────────────────┘
+                       │
                        ▼
-┌─────────────────────────────────────────────────────┐
-│              LLM (Local or Cloud)                   │
-│                                                     │
-│  Ollama (Llama 3)          ← local, private         │
-│  OpenAI (GPT-4o-mini)      ← cloud recommended      │
-│  Anthropic (Claude Haiku)  ← cloud fallback         │
-│  OpenRouter                ← aggregator             │
-└─────────────────────────────────────────────────────┘
-         ▲
-         │ vera ui (port 3000)
-┌────────────────────┐
-│  React Dashboard   │
-│  - Issue cards     │
-│  - Fix preview     │
-│  - One-click apply │
-│  - Report export   │
-└────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│         React Dashboard UI (port 3000)                            │
+│                                                                  │
+│  • Visual issue cards   • Before/after diffs                    │
+│  • One-click apply      • Scan history & export                 │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ### 📋 Rules (WCAG 2.2)
