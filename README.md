@@ -11,8 +11,10 @@ Vera (Verify & Access) is an open-source, AI-powered tool that automates accessi
 ### 🌟 Key Features
 
 - ✅ **Auto-fix generation**: Not just scanning — Vera writes the actual code patches
+- ✅ **Hybrid AI**: Combine local deployment (Ollama) with cloud APIs (OpenAI, Anthropic)
 - ✅ **Dual-layer workflow**: CLI for developers + interactive dashboard for teams
 - ✅ **CI/CD native**: Pre-commit hooks and GitHub Actions integration
+- ✅ **Local-first security**: Scan without sending data off-device by default
 - ✅ **WCAG 2.2 compliant**: 10 core rules (contrast, ARIA, keyboard traps)
 
 ### 🔍 Why Vera?
@@ -30,36 +32,36 @@ Vera (Verify & Access) is an open-source, AI-powered tool that automates accessi
 ## 🏗️ Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                    vera CLI (Node.js)                            │
-│                                                                  │
-│  vera init  →  vera scan  →  vera fix  →  vera ui               │
-│                     │             │                              │
-│             HTTP Client    HTTP Client                           │
-└──────────────────────┬────────────┬──────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    vera CLI (Node.js)                                   │
+│                                                                         │
+│  vera init  →  vera scan  →  vera fix  →  vera ui                     │
+│                     │             │                                     │
+│             HTTP Client    HTTP Client                                 │
+└──────────────────────┬──────────────┬─────────────────────────────────┘
                        │            │
                        ▼            ▼
-┌──────────────────────────────────────────────────────────────────┐
-│         Vera Backend (Python FastAPI + LLM Bridge)               │
-│                                                                  │
-│  POST /scan  ──► Scanner (Heuristics + LLM)                      │
-│  POST /fix   ──► CodeFixer (AST patching + LLM)                  │
-│  GET /health                                                     │
-│                                                                  │
-│  LLM Routing (configured in .verarc.json):                       │
-│  • Ollama                 ← local, private                       │
-│  • OpenAI                 ← cloud recommended                    │
-│  • Anthropic              ← cloud fallback                       │
-│  • OpenRouter             ← cloud aggregator                     │
-└──────────────────────┬───────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│         Vera Backend (Python FastAPI + LLM Bridge)                      │
+│                                                                         │
+│  POST /scan  ──► Scanner (Heuristics + LLM)                            │
+│  POST /fix   ──► CodeFixer (AST patching + LLM)                        │
+│  GET /health                                                            │
+│                                                                         │
+│  LLM Routing (configured in .verarc.json):                              │
+│  • Ollama (Llama 3)       ← local, private                             │
+│  • OpenAI (GPT-4o)        ← cloud recommended                          │
+│  • Anthropic (Claude)     ← cloud fallback                             │
+│  • OpenRouter             ← aggregator                                 │
+└──────────────────────┬───────────────────────────────────────────────┘
                        │
                        ▼
-┌──────────────────────────────────────────────────────────────────┐
-│         React Dashboard UI (port 3000)                            │
-│                                                                  │
-│  • Visual issue cards   • Before/after diffs                    │
-│  • One-click apply      • Scan history & export                 │
-└──────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│         React Dashboard UI (port 3000)                                   │
+│                                                                         │
+│  • Visual issue cards   • Before/after diffs                           │
+│  • One-click apply      • Scan history & export                        │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 📋 Rules (WCAG 2.2)
@@ -83,48 +85,120 @@ Vera (Verify & Access) is an open-source, AI-powered tool that automates accessi
 
 ### System Requirements
 
-- Node.js 18+
-- Docker Compose (optional for containerized backend)
-- Python 3.12+ (if running backend locally)
-- Ollama installation (for local LLM support) OR cloud API keys
+- **Node.js 18+** — Required for CLI
+- **Python 3.12+** — Required for backend (if running locally)
+- **Docker Compose** — Optional, for containerized setup (recommended)
+- **Ollama** — Optional, for local LLM support OR cloud API keys (OpenAI, Anthropic)
 
-### 1. Install the CLI
+---
 
+### Quick Start (Development)
+
+**Step 1: Clone the Repository**
 ```bash
-# Global install for command-line access
-npm install -g @vera-dev/cli
-
-# Or local project install
-npm install --save-dev @vera-dev/cli
+git clone https://github.com/cprite/daily-project-vera-2026-04-06.git
+cd daily-project-vera-2026-04-06
 ```
 
-Verify installation:
+**Step 2: Install CLI (Link Locally)**
+```bash
+cd src/packages/cli
+npm install
+npm link
+```
+
+This makes `vera` available globally in development mode.
+
+**Step 3: Set Up Backend**
+
+Choose one:
+
+**Option A: Docker (Recommended)**
+```bash
+# From project root
+docker-compose up -d
+# Backend at http://localhost:8000
+# Dashboard at http://localhost:3000
+```
+
+**Option B: Manual Python Setup**
+```bash
+cd src/packages/core
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Start backend
+uvicorn vera.api:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**Step 4: Test Installation**
+```bash
+vera --version
+vera scan test/
+```
+
+---
+
+### Detailed Installation Steps
+
+#### 1. Install the CLI
+
+**For Development (from local clone):**
+```bash
+cd src/packages/cli
+npm install
+npm link
+```
+
+**For Production (future, when published to npm):**
+```bash
+npm install -g @vera-dev/cli
+```
+
+Verify:
 ```bash
 vera --version
 ```
 
-### 2. Install Python Dependencies (Backend Only)
+#### 2. Install Python Backend
 
-If you plan to run the backend locally (without Docker), install the required Python packages:
-
+**With Docker Compose:**
 ```bash
-# Navigate to the backend directory
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
+# From project root
+docker-compose up -d
 ```
 
-### 2. Initialize Vera in Your Project
+**Without Docker (Local):**
+```bash
+cd src/packages/core
+
+# Create virtual environment (recommended)
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Start backend with auto-reload
+uvicorn vera.api:app --reload
+
+# Or with specific host/port
+uvicorn vera.api:app --host 0.0.0.0 --port 8000 --reload
+```
+
+#### 3. Initialize Vera in Your Project
 
 ```bash
-# Navigate to your project directory
 cd /path/to/your/project
-
-# Run initialization
 vera init
 ```
 
-Interactive prompts:
+Interactive setup:
 ```
 ? Do you want to use a local LLM? (Y/N): Y
 ? Which model? (llama3/mistral/neural-chat): llama3
@@ -134,18 +208,18 @@ Interactive prompts:
 ? Target framework? (react/vue/vanilla): react
 ```
 
-This creates:
-- `.verarc.json` — Main configuration file
+Creates:
+- `.verarc.json` — Configuration file
 - `.vera/` — Setup and model directory
-- `.env` — Local API keys (gitignored)
+- `.env` — Local API keys (git-ignored)
 
-### 3. Run Your First Scan
+#### 4. Run Your First Scan
 
 ```bash
-# Scan source directory
+# Basic scan (JSON output to console)
 vera scan ./src
 
-# Output: JSON report with violations
+# Output example:
 # {
 #   "violations": [
 #     {
@@ -159,13 +233,12 @@ vera scan ./src
 #   "summary": {
 #     "total": 5,
 #     "critical": 1,
-#     "serious": 2,
-#     "moderate": 2
+#     "serious": 2
 #   }
 # }
 ```
 
-### 4. Preview and Apply Fixes
+#### 5. Preview and Apply Fixes
 
 ```bash
 # Dry run: show proposed changes
@@ -174,21 +247,18 @@ vera fix ./src
 # Shows colored diff output:
 # ✓ [missing-alt] img.logo
 #   + alt="Company Logo"
-# 
-# ✓ [color-contrast] button.primary
-#   + color: #ffffff; (contrast ratio: 7.2:1)
 
 # Apply fixes with confirmation
 vera fix ./src --apply
 
-# Auto-approve all fixes (skip prompt)
+# Auto-approve all fixes (skip prompts)
 vera fix ./src --apply --yes
 
 # Apply only specific violations
 vera fix ./src --apply --violations abc123,def456
 ```
 
-### 5. Launch the Interactive Dashboard
+#### 6. Launch the Interactive Dashboard
 
 ```bash
 # Start dashboard at http://localhost:3000
@@ -208,9 +278,7 @@ Dashboard features:
 - Export reports (JSON, HTML, CSV)
 - Scan history and trending
 
-### 6. Configuration (`.verarc.json`)
-
-Full configuration reference:
+#### 7. Configuration (`.verarc.json`)
 
 ```json
 {
@@ -248,7 +316,7 @@ Full configuration reference:
 }
 ```
 
-### 7. Environment Variables
+#### 8. Environment Variables
 
 ```bash
 # LLM Configuration
@@ -266,9 +334,9 @@ export VERA_LOG_LEVEL=info
 export VERA_FAIL_ON_CRITICAL=true
 ```
 
-### 8. CI/CD Integration
+#### 9. CI/CD Integration
 
-#### GitHub Actions Example
+**GitHub Actions Example:**
 
 Create `.github/workflows/accessibility.yml`:
 
@@ -313,7 +381,7 @@ jobs:
           path: report.json
 ```
 
-#### Pre-Commit Hook
+**Pre-Commit Hook:**
 
 Add to `.husky/pre-commit`:
 
@@ -335,71 +403,36 @@ npx husky-init && npm install
 npx husky add .husky/pre-commit 'vera scan ./src --quiet'
 ```
 
-### 9. Docker Setup (Backend Only)
-
-Run the backend in Docker:
+#### 10. Docker Compose Reference
 
 ```bash
-# Start backend + dashboard
+# Start all services
 docker-compose up -d
 
-# Check logs
+# View logs
 docker-compose logs -f backend
+docker-compose logs -f dashboard
 
 # Stop services
 docker-compose down
+
+# Rebuild containers
+docker-compose up -d --build
 ```
 
-**Manual Backend Setup (without Docker)**:
-
-If you prefer not to use Docker, run the backend locally:
-
-```bash
-# Install Python dependencies (if not done already)
-cd src/packages/core
-pip install -r requirements.txt
-
-# Start the backend
-uvicorn vera.api:app --host 0.0.0.0 --port 8000 --reload
-
-# Or with Python's built-in server:
-python -m vera.api
-```
-
-`docker-compose.yml`:
-```yaml
-version: '3.9'
-services:
-  backend:
-    build: ./src/packages/core
-    ports:
-      - "8000:8000"
-    environment:
-      - VERA_LLM_PROVIDER=openai
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-    volumes:
-      - ./src:/workspace
-  
-  dashboard:
-    build: ./src/packages/dashboard
-    ports:
-      - "3000:3000"
-    depends_on:
-      - backend
-```
-
-### 10. Troubleshooting
+#### 11. Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| `vera: command not found` | Run `npm install -g @vera-dev/cli` or use `npx @vera-dev/cli` |
-| `Error: LLM model not found` | Run `ollama run llama3` to download the model |
+| `vera: command not found` | Run `npm link` in `src/packages/cli` |
+| `Error: LLM model not found` | Run `ollama run llama3` to download |
 | `API key invalid` | Check `echo $OPENAI_API_KEY` or update `.verarc.json` |
-| `Port 3000 already in use` | Run `vera ui --port 4000` or `lsof -i :3000` to find process |
-| `Backend connection refused` | Ensure backend is running: `curl http://localhost:8000/health` |
-| `No violations found` | Check that source directory contains `.jsx`, `.tsx`, or `.html` files |
+| `Port 3000 already in use` | Run `vera ui --port 4000` or find process with `lsof -i :3000` |
+| `Backend connection refused` | Ensure backend running: `curl http://localhost:8000/health` |
+| `No violations found` | Check that directory contains `.jsx`, `.tsx`, or `.html` files |
+| `Docker build fails` | Try `docker-compose up -d --build` to rebuild |
 
-### 11. Advanced Usage
+#### 12. Advanced Usage
 
 ```bash
 # Generate HTML report
@@ -455,6 +488,8 @@ We welcome contributions! Here's how:
 3. Commit changes (`git commit -m 'Add feature'`)
 4. Push (`git push origin feature/my-fix`)
 5. Open a Pull Request
+
+All contributions follow the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
 
 ---
 
