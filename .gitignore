@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Env / secrets
+.env
+.env.local
+.verarc.json
+
+# Reports
+vera-report.json
+vera-report.html
+
+# Misc
+.DS_Store
+*.log
+.cache/

@@ -1,0 +1,27 @@
+{
+  "name": "@vera-dev/cli",
+  "version": "1.0.0",
+  "description": "Vera CLI — AI-powered accessibility auto-remediator",
+  "bin": {
+    "vera": "./dist/bin/vera.js"
+  },
+  "main": "./dist/src/index.js",
+  "files": ["dist/"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/bin/vera.js",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

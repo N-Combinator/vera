@@ -1,0 +1,17 @@
+{
+  "framework": "auto",
+  "llm": {
+    "provider": "ollama",
+    "model": "llama3",
+    "endpoint": "http://localhost:11434",
+    "timeout": 60,
+    "temperature": 0.1,
+    "max_tokens": 2048
+  },
+  "rules": [],
+  "ignore_paths": ["node_modules", ".git", "dist", "build", ".next", ".cache"],
+  "output_format": "json",
+  "max_files": 500,
+  "confidence_threshold": 0.6,
+  "backend_url": "http://localhost:8000"
+}

@@ -1,0 +1,61 @@
+version: "3.9"
+
+services:
+  # ── Python FastAPI Backend ─────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./src/packages/core
+      dockerfile: Dockerfile
+    container_name: vera-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: 8000
+      VERA_DEV: ${VERA_DEV:-0}
+      VERA_LLM_PROVIDER: ${VERA_LLM_PROVIDER:-ollama}
+      VERA_LLM_MODEL: ${VERA_LLM_MODEL:-llama3}
+      VERA_LLM_ENDPOINT: ${VERA_LLM_ENDPOINT:-http://host.docker.internal:11434}
+      VERA_API_KEY: ${VERA_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      # Mount working directory so vera can scan host files
+      - ${SCAN_TARGET:-./}:/workspace:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── React Dashboard ────────────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ./src/packages/dashboard
+      dockerfile: Dockerfile
+      args:
+        VITE_BACKEND_URL: http://localhost:8000
+    container_name: vera-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+networks:
+  default:
+    name: vera-network

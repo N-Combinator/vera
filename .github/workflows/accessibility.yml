@@ -1,0 +1,83 @@
+name: Accessibility Scan (Vera)
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  vera-scan:
+    name: Vera Accessibility Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Vera backend
+        working-directory: src/packages/core
+        run: pip install -r requirements.txt
+
+      - name: Start Vera backend
+        working-directory: src/packages/core
+        run: |
+          uvicorn vera.api:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+        env:
+          VERA_LLM_PROVIDER: ollama
+          VERA_DEV: "1"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: src/packages/cli/package.json
+
+      - name: Build Vera CLI
+        working-directory: src/packages/cli
+        run: |
+          npm install
+          npm run build
+
+      - name: Run accessibility scan
+        working-directory: src/packages/cli
+        run: |
+          node dist/bin/vera.js scan ${{ github.workspace }} \
+            --format json \
+            --output /tmp/vera-report.json \
+            --no-llm \
+            --quiet || true
+
+      - name: Check for critical violations
+        run: |
+          CRITICAL=$(python3 -c "
+          import json, sys
+          with open('/tmp/vera-report.json') as f:
+              data = json.load(f)
+          violations = data.get('violations', [])
+          critical = [v for v in violations if v['severity'] == 'critical']
+          print(len(critical))
+          ")
+          echo "Critical violations: $CRITICAL"
+          if [ "$CRITICAL" -gt "0" ]; then
+            echo "❌ $CRITICAL critical accessibility violation(s) found!"
+            cat /tmp/vera-report.json | python3 -m json.tool
+            exit 1
+          fi
+          echo "✅ No critical accessibility violations."
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vera-accessibility-report
+          path: /tmp/vera-report.json
+          retention-days: 30

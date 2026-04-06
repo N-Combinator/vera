@@ -1,0 +1,18 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+echo "⚡ Vera pre-commit accessibility scan..."
+
+if command -v vera &>/dev/null; then
+  if ! vera scan ./src --quiet --no-llm; then
+    echo ""
+    echo "❌ Accessibility issues found."
+    echo "   Run 'vera fix ./src' to auto-fix, or"
+    echo "   Run 'vera scan ./src' to see details."
+    echo ""
+    exit 1
+  fi
+  echo "✅ No critical accessibility issues."
+else
+  echo "ℹ️  Vera CLI not installed (skipping). Install: npm install -g @vera-dev/cli"
+fi
