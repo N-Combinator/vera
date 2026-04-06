@@ -108,10 +108,22 @@ npm install
 
 **Step 2b: Make vera Command Accessible (Choose One)**
 
-*Option A: npx (Easiest, no permissions needed)*
+*Option A: node (Easiest, direct execution)*
 ```bash
 # From any directory, use:
-npx /path/to/vera/src/packages/cli/bin/vera scan ./src
+node /path/to/vera/src/packages/cli/bin/vera scan ./src
+
+# Example:
+node /Users/niknmirosh/Documents/cprite/vera/src/packages/cli/bin/vera scan test/
+```
+
+*Option A2: npx (alternative)*
+```bash
+# Point to the CLI package directory (not bin/vera):
+npx /path/to/vera/src/packages/cli scan ./src
+
+# Example:
+npx /Users/niknmirosh/Documents/cprite/vera/src/packages/cli scan test/
 ```
 
 *Option B: npm link (if you have permissions)*
@@ -124,7 +136,7 @@ npm link
 *Option C: Shell Alias (Recommended for macOS/Linux)*
 ```bash
 # Add this to ~/.zshrc or ~/.bashrc
-alias vera='npx /absolute/path/to/vera/src/packages/cli/bin/vera'
+alias vera='node /absolute/path/to/vera/src/packages/cli/bin/vera'
 
 # Then reload: source ~/.zshrc
 # Now use: vera scan ./src
@@ -168,9 +180,9 @@ uvicorn vera.api:app --host 0.0.0.0 --port 8000 --reload
 
 **Step 4: Test Installation**
 ```bash
-# Using npx (works without permissions)
-npx ./src/packages/cli/bin/vera --version
-npx ./src/packages/cli/bin/vera scan test/
+# Using node (works without permissions)
+node ./src/packages/cli/bin/vera --version
+node ./src/packages/cli/bin/vera scan test/
 
 # Or if you used alias/PATH method:
 vera --version
@@ -459,16 +471,17 @@ docker-compose up -d --build
 
 | Issue | Solution |
 |-------|----------|
-| `vera: command not found` | Use `npx ./src/packages/cli/bin/vera` or add alias/PATH (see Step 2b) |
-| `npm link: EACCES permission denied` | Use `npx` method instead (no sudo needed): `npx ./src/packages/cli/bin/vera` |
+| `vera: command not found` | Use `node ./src/packages/cli/bin/vera` or add alias/PATH (see Step 2b) |
+| `npm link: EACCES permission denied` | Use `node` method instead (no sudo needed): `node ./src/packages/cli/bin/vera` |
+| `npx: Cannot find package.json` | Use `node` instead: `node /path/to/vera/src/packages/cli/bin/vera` |
 | `Error: LLM model not found` | Run `ollama run llama3` to download |
 | `API key invalid` | Check `echo $OPENAI_API_KEY` or update `.verarc.json` |
 | `Port 3000 already in use` | Run `vera ui --port 4000` or find process with `lsof -i :3000` |
 | `Backend connection refused` | Ensure backend running: `curl http://localhost:8000/health` |
 | `No violations found` | Check that directory contains `.jsx`, `.tsx`, or `.html` files |
 | `Docker build fails` | Try `docker-compose up -d --build` to rebuild |
-| `Command not found after npm link` | Use npx instead: `npx ./src/packages/cli/bin/vera scan ./src` |
-| `Permission denied mkdir /usr/local/lib/node_modules` | You don't have write permissions to global npm directory. Use npx method or create shell alias instead. |
+| `Command not found after npm link` | Use node instead: `node ./src/packages/cli/bin/vera scan ./src` |
+| `Permission denied mkdir /usr/local/lib/node_modules` | You don't have write permissions to global npm directory. Use `node` method or create shell alias instead. |
 
 #### 12. Advanced Usage
 
