@@ -103,6 +103,23 @@ Verify installation:
 vera --version
 ```
 
+### 2. Install Python Dependencies (Backend Only)
+
+If you plan to run the backend locally (without Docker), install the required Python packages:
+
+```bash
+# Navigate to the backend directory
+cd src/packages/core
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Or in a virtual environment:
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
 ### 2. Initialize Vera in Your Project
 
 ```bash
@@ -337,6 +354,22 @@ docker-compose logs -f backend
 
 # Stop services
 docker-compose down
+```
+
+**Manual Backend Setup (without Docker)**:
+
+If you prefer not to use Docker, run the backend locally:
+
+```bash
+# Install Python dependencies (if not done already)
+cd src/packages/core
+pip install -r requirements.txt
+
+# Start the backend
+uvicorn vera.api:app --host 0.0.0.0 --port 8000 --reload
+
+# Or with Python's built-in server:
+python -m vera.api
 ```
 
 `docker-compose.yml`:
