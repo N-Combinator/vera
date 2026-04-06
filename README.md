@@ -442,8 +442,6 @@ We welcome contributions! Here's how:
 4. Push (`git push origin feature/my-fix`)
 5. Open a Pull Request
 
-All contributions follow the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
-
 ---
 
 ## 📄 License
