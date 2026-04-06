@@ -42,16 +42,16 @@ Vera (Verify & Access) is an open-source, AI-powered tool that automates accessi
 ┌──────────────────────────────────────────────────────────────────┐
 │         Vera Backend (Python FastAPI + LLM Bridge)               │
 │                                                                  │
-│  POST /scan  ──► Scanner (Heuristics + LLM)                     │
-│  POST /fix   ──► CodeFixer (AST patching + LLM)                 │
-│  GET /health                                                    │
+│  POST /scan  ──► Scanner (Heuristics + LLM)                      │
+│  POST /fix   ──► CodeFixer (AST patching + LLM)                  │
+│  GET /health                                                     │
 │                                                                  │
 │  LLM Routing (configured in .verarc.json):                       │
-│  • Ollama (Llama 3)       ← local, private                       │
-│  • OpenAI (GPT-4o)        ← cloud recommended                    │
-│  • Anthropic (Claude)     ← cloud fallback                       │
-│  • OpenRouter             ← aggregator                           │
-└──────────────────────┬────────────────────────────────────────────┘
+│  • Ollama                 ← local, private                       │
+│  • OpenAI                 ← cloud recommended                    │
+│  • Anthropic              ← cloud fallback                       │
+│  • OpenRouter             ← cloud aggregator                     │
+└──────────────────────┬───────────────────────────────────────────┘
                        │
                        ▼
 ┌──────────────────────────────────────────────────────────────────┐
