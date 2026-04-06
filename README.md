@@ -100,30 +100,36 @@ git clone https://github.com/cprite/daily-project-vera-2026-04-06.git
 cd daily-project-vera-2026-04-06
 ```
 
-**Step 2: Install CLI Dependencies**
+**Step 2: Install & Build CLI**
 ```bash
 cd src/packages/cli
+
+# Install dependencies
 npm install
+
+# Compile TypeScript to JavaScript
+npm run build
 ```
 
 **Step 2b: Make vera Command Accessible (Choose One)**
 
-*Option A: node (Easiest, direct execution)*
+*Option A: node (Easiest, after build)*
 ```bash
-# From any directory, use:
-node /path/to/vera/src/packages/cli/bin/vera scan ./src
+# From any directory, use the compiled version:
+node /path/to/vera/src/packages/cli/dist/bin/vera.js scan ./src
 
 # Example:
-node /Users/niknmirosh/Documents/cprite/vera/src/packages/cli/bin/vera scan test/
+node /Users/niknmirosh/Documents/cprite/vera/src/packages/cli/dist/bin/vera.js scan test/
 ```
 
-*Option A2: npx (alternative)*
+*Option A2: npm run (from CLI directory)*
 ```bash
-# Point to the CLI package directory (not bin/vera):
-npx /path/to/vera/src/packages/cli scan ./src
+cd /path/to/vera/src/packages/cli
+npm start scan ./src
 
 # Example:
-npx /Users/niknmirosh/Documents/cprite/vera/src/packages/cli scan test/
+cd /Users/niknmirosh/Documents/cprite/vera/src/packages/cli
+npm start scan test/
 ```
 
 *Option B: npm link (if you have permissions)*
@@ -136,16 +142,17 @@ npm link
 *Option C: Shell Alias (Recommended for macOS/Linux)*
 ```bash
 # Add this to ~/.zshrc or ~/.bashrc
-alias vera='node /absolute/path/to/vera/src/packages/cli/bin/vera'
+alias vera='node /absolute/path/to/vera/src/packages/cli/dist/bin/vera.js'
 
 # Then reload: source ~/.zshrc
 # Now use: vera scan ./src
 ```
 
-*Option D: Add to PATH*
+*Option D: Add compiled bin to PATH*
 ```bash
-# Add to ~/.zshrc or ~/.bashrc
-export PATH="$PATH:/absolute/path/to/vera/src/packages/cli/bin"
+# Note: You must run 'npm run build' in src/packages/cli first
+# Then add to ~/.zshrc or ~/.bashrc
+export PATH="$PATH:/absolute/path/to/vera/src/packages/cli/dist/bin"
 
 # Then reload: source ~/.zshrc
 # Now use: vera scan ./src
@@ -180,11 +187,16 @@ uvicorn vera.api:app --host 0.0.0.0 --port 8000 --reload
 
 **Step 4: Test Installation**
 ```bash
-# Using node (works without permissions)
-node ./src/packages/cli/bin/vera --version
-node ./src/packages/cli/bin/vera scan test/
+# Using node with compiled version
+node ./src/packages/cli/dist/bin/vera.js --version
+node ./src/packages/cli/dist/bin/vera.js scan test/
 
-# Or if you used alias/PATH method:
+# Or from CLI directory:
+cd src/packages/cli
+npm start --version
+npm start scan test/
+
+# Or if you set up alias:
 vera --version
 vera scan test/
 ```
@@ -193,12 +205,19 @@ vera scan test/
 
 ### Detailed Installation Steps
 
-#### 1. Install the CLI
+#### 1. Install & Build the CLI
 
 **For Development (from local clone):**
 ```bash
 cd src/packages/cli
+
+# Install dependencies
 npm install
+
+# Build TypeScript to JavaScript
+npm run build
+
+# Optional: Link globally (requires permissions)
 npm link
 ```
 
@@ -471,17 +490,17 @@ docker-compose up -d --build
 
 | Issue | Solution |
 |-------|----------|
-| `vera: command not found` | Use `node ./src/packages/cli/bin/vera` or add alias/PATH (see Step 2b) |
-| `npm link: EACCES permission denied` | Use `node` method instead (no sudo needed): `node ./src/packages/cli/bin/vera` |
-| `npx: Cannot find package.json` | Use `node` instead: `node /path/to/vera/src/packages/cli/bin/vera` |
+| `Cannot find module '/vera/src/packages/cli/bin/vera'` | Run `npm run build` in `src/packages/cli` first to compile TypeScript |
+| `vera: command not found` | Use `node ./src/packages/cli/dist/bin/vera.js` or add alias/PATH (see Step 2b) |
+| `npm link: EACCES permission denied` | Use `node ./src/packages/cli/dist/bin/vera.js` instead (no sudo needed) |
 | `Error: LLM model not found` | Run `ollama run llama3` to download |
 | `API key invalid` | Check `echo $OPENAI_API_KEY` or update `.verarc.json` |
 | `Port 3000 already in use` | Run `vera ui --port 4000` or find process with `lsof -i :3000` |
 | `Backend connection refused` | Ensure backend running: `curl http://localhost:8000/health` |
 | `No violations found` | Check that directory contains `.jsx`, `.tsx`, or `.html` files |
 | `Docker build fails` | Try `docker-compose up -d --build` to rebuild |
-| `Command not found after npm link` | Use node instead: `node ./src/packages/cli/bin/vera scan ./src` |
-| `Permission denied mkdir /usr/local/lib/node_modules` | You don't have write permissions to global npm directory. Use `node` method or create shell alias instead. |
+| `TypeScript not compiled` | Run `npm run build` in `src/packages/cli` directory |
+| `Permission denied mkdir /usr/local/lib/node_modules` | You don't have write permissions. Use `node ./dist/bin/vera.js` method or create shell alias instead. |
 
 #### 12. Advanced Usage
 
