@@ -109,12 +109,6 @@ If you plan to run the backend locally (without Docker), install the required Py
 
 ```bash
 # Navigate to the backend directory
-cd src/packages/core
-
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Or in a virtual environment:
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
