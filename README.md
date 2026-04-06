@@ -100,14 +100,44 @@ git clone https://github.com/cprite/daily-project-vera-2026-04-06.git
 cd daily-project-vera-2026-04-06
 ```
 
-**Step 2: Install CLI (Link Locally)**
+**Step 2: Install CLI Dependencies**
 ```bash
 cd src/packages/cli
 npm install
-npm link
 ```
 
-This makes `vera` available globally in development mode.
+**Step 2b: Make vera Command Accessible (Choose One)**
+
+*Option A: npx (Easiest, no permissions needed)*
+```bash
+# From any directory, use:
+npx /path/to/vera/src/packages/cli/bin/vera scan ./src
+```
+
+*Option B: npm link (if you have permissions)*
+```bash
+cd src/packages/cli
+npm link
+# Then use: vera scan ./src
+```
+
+*Option C: Shell Alias (Recommended for macOS/Linux)*
+```bash
+# Add this to ~/.zshrc or ~/.bashrc
+alias vera='npx /absolute/path/to/vera/src/packages/cli/bin/vera'
+
+# Then reload: source ~/.zshrc
+# Now use: vera scan ./src
+```
+
+*Option D: Add to PATH*
+```bash
+# Add to ~/.zshrc or ~/.bashrc
+export PATH="$PATH:/absolute/path/to/vera/src/packages/cli/bin"
+
+# Then reload: source ~/.zshrc
+# Now use: vera scan ./src
+```
 
 **Step 3: Set Up Backend**
 
@@ -138,6 +168,11 @@ uvicorn vera.api:app --host 0.0.0.0 --port 8000 --reload
 
 **Step 4: Test Installation**
 ```bash
+# Using npx (works without permissions)
+npx ./src/packages/cli/bin/vera --version
+npx ./src/packages/cli/bin/vera scan test/
+
+# Or if you used alias/PATH method:
 vera --version
 vera scan test/
 ```
@@ -424,13 +459,16 @@ docker-compose up -d --build
 
 | Issue | Solution |
 |-------|----------|
-| `vera: command not found` | Run `npm link` in `src/packages/cli` |
+| `vera: command not found` | Use `npx ./src/packages/cli/bin/vera` or add alias/PATH (see Step 2b) |
+| `npm link: EACCES permission denied` | Use `npx` method instead (no sudo needed): `npx ./src/packages/cli/bin/vera` |
 | `Error: LLM model not found` | Run `ollama run llama3` to download |
 | `API key invalid` | Check `echo $OPENAI_API_KEY` or update `.verarc.json` |
 | `Port 3000 already in use` | Run `vera ui --port 4000` or find process with `lsof -i :3000` |
 | `Backend connection refused` | Ensure backend running: `curl http://localhost:8000/health` |
 | `No violations found` | Check that directory contains `.jsx`, `.tsx`, or `.html` files |
 | `Docker build fails` | Try `docker-compose up -d --build` to rebuild |
+| `Command not found after npm link` | Use npx instead: `npx ./src/packages/cli/bin/vera scan ./src` |
+| `Permission denied mkdir /usr/local/lib/node_modules` | You don't have write permissions to global npm directory. Use npx method or create shell alias instead. |
 
 #### 12. Advanced Usage
 
