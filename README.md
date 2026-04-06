@@ -9,7 +9,7 @@ Vera (Verify and Access) scans React, Vue, HTML, and JSX codebases for WCAG 2.2 
 ## Why Vera?
 
 - **Auto-fixes, not just reports** — Vera writes the corrected code for you
-- **Local-first AI** — Uses Ollama (Llama 3, Mistral) so nothing leaves your machine
+- **Hybrid AI approach** — Use local LLMs (Ollama) for privacy, or cloud APIs (OpenAI, Anthropic) for speed and accuracy — **API-based scanning recommended for production**
 - **CI/CD native** — GitHub Actions integration, pre-commit hooks
 - **Zero setup friction** — `vera scan ./src` just works
 
