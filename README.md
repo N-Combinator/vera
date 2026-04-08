@@ -11,10 +11,8 @@ Vera (Verify & Access) is an open-source, AI-powered tool that automates accessi
 ### 🌟 Key Features
 
 - ✅ **Auto-fix generation**: Not just scanning — Vera writes the actual code patches
-- ✅ **Hybrid AI**: Combine local deployment (Ollama) with cloud APIs (OpenAI, Anthropic)
 - ✅ **Dual-layer workflow**: CLI for developers + interactive dashboard for teams
 - ✅ **CI/CD native**: Pre-commit hooks and GitHub Actions integration
-- ✅ **Local-first security**: Scan without sending data off-device by default
 - ✅ **WCAG 2.2 compliant**: 10 core rules (contrast, ARIA, keyboard traps)
 
 ### 🔍 Why Vera?
