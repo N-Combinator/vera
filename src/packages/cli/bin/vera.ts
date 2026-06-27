@@ -9,6 +9,7 @@ import { initCommand } from "../src/commands/init";
 import { scanCommand } from "../src/commands/scan";
 import { fixCommand } from "../src/commands/fix";
 import { uiCommand } from "../src/commands/ui";
+import { describeCommand } from "../src/commands/describe";
 
 const program = new Command();
 
@@ -63,6 +64,24 @@ program
       violations: opts.violations,
       yes:        opts.yes,
       quiet:      opts.quiet,
+    })
+  );
+
+// ── describe (Vera-Describe, opt-in) ──────────────────────────────────────────
+program
+  .command("describe <path>")
+  .alias("check-alt")
+  .description("AI alt-text quality review (WCAG 1.1.1) — suggest-only, never writes")
+  .option("--api-key <key>", "Anthropic API key (else ANTHROPIC_API_KEY env)")
+  .option("--model <model>", "Vision model", "claude-sonnet-4-6")
+  .option("-o, --output <file>", "Write JSON report to file")
+  .option("-q, --quiet", "Suppress output; exit non-zero if weak/missing found (CI)")
+  .action((targetPath, opts) =>
+    describeCommand(targetPath, {
+      apiKey: opts.apiKey,
+      model:  opts.model,
+      output: opts.output,
+      quiet:  opts.quiet,
     })
   );
 

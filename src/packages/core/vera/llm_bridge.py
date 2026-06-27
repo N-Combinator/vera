@@ -150,6 +150,47 @@ class LLMBridge:
             logger.warning(f"[LLM] generate_fix failed: {e}")
             return None
 
+    # ── Vision completion (for Vera-Describe) ─────────────────────────────────
+
+    async def vision_complete(
+        self,
+        prompt: str,
+        image_b64: str,
+        media_type: str,
+        model: Optional[str] = None,
+    ) -> str:
+        """Send a prompt + image to a vision-capable model (Anthropic Messages).
+
+        Used by the opt-in Vera-Describe module. Defaults to claude-sonnet-4-6.
+        """
+        payload = {
+            "model": model or "claude-sonnet-4-6",
+            "max_tokens": self.config.max_tokens,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": image_b64,
+                    }},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+        }
+        resp = await self._client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": self.config.api_key or "",
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json=payload,
+            timeout=self.config.timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()["content"][0]["text"]
+
     # ── Provider Routing ──────────────────────────────────────────────────────
 
     async def _complete(self, prompt: str) -> str:

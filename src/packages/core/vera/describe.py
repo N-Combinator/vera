@@ -255,3 +255,329 @@ def is_in_scope_src(src: str) -> bool:
     if src.startswith("data:"):        # inline data URI — out of scope
         return False
     return True
+
+
+# ── Image loading ──────────────────────────────────────────────────────────────
+
+class LoadedImage(BaseModel):
+    b64: str
+    media_type: str          # e.g. "image/png" — what the vision API expects
+    width: int
+    height: int
+
+
+def _media_type_for(fmt: str) -> str:
+    fmt = fmt.lower()
+    return "image/jpeg" if fmt in ("jpg", "jpeg") else f"image/{fmt}"
+
+
+class ImageLoader:
+    """Resolve an <img src> to validated, base64-encoded bytes for the vision API.
+
+    Returns None for anything out of scope or unfetchable — a single bad image
+    must never crash the whole run.
+    """
+
+    def __init__(self, http_get=None, timeout: int = 15):
+        # http_get(url) -> bytes ; injectable for tests / custom clients.
+        self._http_get = http_get
+        self._timeout = timeout
+
+    def _fetch_bytes(self, src: str, base_dir: Optional[Path]) -> Optional[bytes]:
+        parsed = urlparse(src)
+        if parsed.scheme in ("http", "https"):
+            try:
+                if self._http_get is not None:
+                    return self._http_get(src)
+                import httpx
+                resp = httpx.get(src, timeout=self._timeout, follow_redirects=True)
+                resp.raise_for_status()
+                return resp.content
+            except Exception as e:
+                logger.warning(f"[describe] fetch failed for {src}: {e}")
+                return None
+        # Local path (relative to the file that referenced it, else cwd).
+        try:
+            p = Path(src)
+            if not p.is_absolute() and base_dir is not None:
+                p = base_dir / src
+            if not p.exists():
+                logger.warning(f"[describe] local image not found: {p}")
+                return None
+            return p.read_bytes()
+        except Exception as e:
+            logger.warning(f"[describe] local read failed for {src}: {e}")
+            return None
+
+    def load(self, src: str, base_dir: Optional[Path] = None) -> Optional[LoadedImage]:
+        if not is_in_scope_src(src):
+            return None
+        raw = self._fetch_bytes(src, base_dir)
+        if not raw:
+            return None
+        if len(raw) > MAX_IMAGE_BYTES:
+            logger.warning(f"[describe] image exceeds {MAX_IMAGE_BYTES} bytes: {src}")
+            return None
+        try:
+            from io import BytesIO
+            from PIL import Image
+            im = Image.open(BytesIO(raw))
+            im.verify()                      # integrity check
+            fmt = (im.format or "").lower()
+        except Exception as e:
+            logger.warning(f"[describe] not a valid image {src}: {e}")
+            return None
+        if fmt not in SUPPORTED_FORMATS:
+            logger.warning(f"[describe] unsupported format '{fmt}' for {src}")
+            return None
+        # Re-open for dimensions (verify() leaves the file unusable).
+        try:
+            from io import BytesIO
+            from PIL import Image
+            im2 = Image.open(BytesIO(raw))
+            w, h = im2.size
+        except Exception:
+            w = h = 0
+        return LoadedImage(
+            b64=base64.b64encode(raw).decode("ascii"),
+            media_type=_media_type_for(fmt),
+            width=w,
+            height=h,
+        )
+
+
+# ── Vision evaluation ──────────────────────────────────────────────────────────
+
+VISION_RUBRIC_PROMPT = """\
+You are a WCAG 2.2 accessibility expert reviewing alt text against the REAL image.
+
+Context for this <img>:
+- role: {role}
+- existing alt: {existing_alt}
+- nearby text: {nearby_text}
+- figure caption: {figcaption}
+
+Evaluate the EXISTING alt against the image by this rubric:
+1. accuracy — does it match what the image actually shows?
+2. brevity — concise (no "image of"/"picture of" padding)?
+3. no-filename — not a filename, "image", or generic placeholder?
+4. context-match — appropriate for a {role} image; not duplicating nearby text/caption?
+
+Return ONLY JSON:
+{{
+  "verdict": "pass" | "weak" | "missing",
+  "score": <0.0-1.0>,
+  "reasons": ["<short reason>", ...],
+  "suggested_alt": "<improved alt, or empty string if existing alt already passes>"
+}}
+Rules: "missing" if there is no usable alt. "weak" if present but fails the rubric.
+For functional images describe the ACTION; for complex images give a short alt and
+note that a long description is needed. Never invent details not visible.
+"""
+
+
+def _verdict_from(raw: dict, has_alt: bool) -> AltVerdict:
+    v = str(raw.get("verdict", "")).lower()
+    if v in ("pass", "weak", "missing"):
+        return AltVerdict(v)
+    return AltVerdict.MISSING if not has_alt else AltVerdict.WEAK
+
+
+class VisionEvaluator:
+    """Evaluate one image's alt text via a vision-capable LLM.
+
+    `vision_complete(prompt, image_b64, media_type) -> str` is injected so the
+    evaluator is fully unit-testable without a live API or key.
+    """
+
+    def __init__(self, vision_complete):
+        self._complete = vision_complete
+
+    async def evaluate(self, img: ImageRef, loaded: LoadedImage, role: ImageRole) -> AltEvaluation:
+        prompt = VISION_RUBRIC_PROMPT.format(
+            role=role.value,
+            existing_alt=(img.alt if img.has_alt_attr else "<none>"),
+            nearby_text=img.nearby_text[:400] or "<none>",
+            figcaption=img.figcaption or "<none>",
+        )
+        import json as _json
+        try:
+            raw_text = await self._complete(prompt, loaded.b64, loaded.media_type)
+            data = _extract_json_obj(raw_text)
+        except Exception as e:
+            logger.warning(f"[describe] vision eval failed for {img.src}: {e}")
+            return AltEvaluation(
+                src=img.src, file=img.file, line=img.line, role=role,
+                verdict=AltVerdict.SKIPPED, existing_alt=img.alt,
+                note=f"vision call failed: {e}",
+            )
+        verdict = _verdict_from(data, img.has_alt_attr and bool(img.alt))
+        suggested = (data.get("suggested_alt") or "").strip() or None
+        if verdict == AltVerdict.PASS:
+            suggested = None
+        return AltEvaluation(
+            src=img.src, file=img.file, line=img.line, role=role,
+            verdict=verdict,
+            score=float(data.get("score", 0.0) or 0.0),
+            reasons=[str(r) for r in (data.get("reasons") or [])][:5],
+            existing_alt=img.alt,
+            suggested_alt=suggested,
+        )
+
+
+def _extract_json_obj(raw: str) -> dict:
+    import json as _json
+    raw = (raw or "").strip()
+    try:
+        d = _json.loads(raw)
+        if isinstance(d, dict):
+            return d
+    except Exception:
+        pass
+    start, end = raw.find("{"), raw.rfind("}")
+    if start != -1 and end > start:
+        try:
+            d = _json.loads(raw[start:end + 1])
+            if isinstance(d, dict):
+                return d
+        except Exception:
+            pass
+    return {}
+
+
+# ── Orchestrator ───────────────────────────────────────────────────────────────
+
+async def describe_content(
+    content: str,
+    filepath: str,
+    *,
+    loader: ImageLoader,
+    evaluator: Optional[VisionEvaluator],
+    base_dir: Optional[Path] = None,
+) -> List[AltEvaluation]:
+    """Evaluate every <img> in one piece of content. Pure orchestration —
+    extraction → classify → (skip decorative/out-of-scope) → load → vision."""
+    out: List[AltEvaluation] = []
+    for img in extract_images(content, filepath):
+        role = classify_role(img)
+
+        if role == ImageRole.DECORATIVE:
+            out.append(AltEvaluation(
+                src=img.src, file=img.file, line=img.line, role=role,
+                verdict=AltVerdict.SKIPPED, existing_alt=img.alt,
+                note="decorative — intentionally not described",
+            ))
+            continue
+
+        if not is_in_scope_src(img.src):
+            out.append(AltEvaluation(
+                src=img.src, file=img.file, line=img.line, role=role,
+                verdict=AltVerdict.SKIPPED, existing_alt=img.alt,
+                note="src out of MVP scope (dynamic/data-uri/empty)",
+            ))
+            continue
+
+        loaded = loader.load(img.src, base_dir)
+        if loaded is None:
+            # Could not fetch the pixels. We still know whether alt is absent.
+            verdict = AltVerdict.MISSING if not (img.has_alt_attr and img.alt) else AltVerdict.SKIPPED
+            out.append(AltEvaluation(
+                src=img.src, file=img.file, line=img.line, role=role,
+                verdict=verdict, existing_alt=img.alt,
+                note="image could not be loaded; verdict from alt presence only",
+            ))
+            continue
+
+        if evaluator is None:
+            out.append(AltEvaluation(
+                src=img.src, file=img.file, line=img.line, role=role,
+                verdict=AltVerdict.SKIPPED, existing_alt=img.alt,
+                note="vision evaluator unavailable (no API key)",
+            ))
+            continue
+
+        out.append(await evaluator.evaluate(img, loaded, role))
+    return out
+
+
+# ── Top-level entry point ──────────────────────────────────────────────────────
+
+_DESCRIBE_EXTENSIONS = {".html", ".htm", ".jsx", ".tsx", ".vue"}
+
+
+def _build_default_evaluator(api_key: Optional[str], model: Optional[str]):
+    """Wire a real Claude-Vision evaluator, or None when no key is available
+    (the run still reports structure/decoration; it just can't grade pixels)."""
+    if not api_key:
+        return None
+    from .llm_bridge import LLMBridge
+    from .models import LLMConfig
+
+    bridge = LLMBridge(LLMConfig(provider="anthropic", api_key=api_key,
+                                 model=model or "claude-sonnet-4-6"))
+
+    async def vision_complete(prompt: str, image_b64: str, media_type: str) -> str:
+        return await bridge.vision_complete(prompt, image_b64, media_type, model=model)
+
+    return VisionEvaluator(vision_complete)
+
+
+async def run_describe(
+    target: str,
+    *,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    loader: Optional[ImageLoader] = None,
+    evaluator: Optional[VisionEvaluator] = "default",
+) -> DescribeReport:
+    """Run Vera-Describe over a URL, a single HTML/JSX file, or a directory.
+
+    SUGGEST-ONLY: produces a report; never writes to disk or alters source.
+    """
+    loader = loader or ImageLoader()
+    if evaluator == "default":
+        evaluator = _build_default_evaluator(api_key, model)
+
+    report = DescribeReport(target=target)
+
+    # 1) Remote page.
+    if target.startswith("http://") or target.startswith("https://"):
+        try:
+            import httpx
+            resp = httpx.get(target, timeout=20, follow_redirects=True)
+            resp.raise_for_status()
+            content = resp.text
+        except Exception as e:
+            logger.error(f"[describe] could not fetch page {target}: {e}")
+            return report
+        evals = await describe_content(content, target, loader=loader,
+                                       evaluator=evaluator, base_dir=None)
+        report.evaluations.extend(evals)
+        report.images_found = len(extract_images(content, target))
+        return report
+
+    # 2) Local file or directory.
+    path = Path(target)
+    files: List[Path] = []
+    if path.is_file():
+        files = [path]
+    elif path.is_dir():
+        files = [p for p in path.rglob("*")
+                 if p.is_file() and p.suffix.lower() in _DESCRIBE_EXTENSIONS]
+    else:
+        logger.error(f"[describe] target not found: {target}")
+        return report
+
+    for f in files:
+        try:
+            content = f.read_text(encoding="utf-8", errors="ignore")
+        except OSError as e:
+            logger.warning(f"[describe] cannot read {f}: {e}")
+            continue
+        report.images_found += len(extract_images(content, str(f)))
+        evals = await describe_content(content, str(f), loader=loader,
+                                       evaluator=evaluator, base_dir=f.parent)
+        report.evaluations.extend(evals)
+
+    return report
+

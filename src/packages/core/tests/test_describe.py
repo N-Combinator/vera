@@ -1,12 +1,26 @@
-"""Unit tests for Vera-Describe extraction + role classification (no network)."""
+"""Unit tests for Vera-Describe (no network, no API key)."""
+
+import asyncio
+from io import BytesIO
+
+from PIL import Image
 
 from vera.describe import (
     AltVerdict,
+    ImageLoader,
     ImageRole,
+    VisionEvaluator,
     classify_role,
+    describe_content,
     extract_images,
     is_in_scope_src,
 )
+
+
+def _png_bytes(size=(8, 8), color=(255, 0, 0)):
+    buf = BytesIO()
+    Image.new("RGB", size, color).save(buf, format="PNG")
+    return buf.getvalue()
 
 # ── Extraction ─────────────────────────────────────────────────────────────────
 
@@ -109,3 +123,112 @@ def test_scope_rejects_data_and_dynamic():
     assert is_in_scope_src("data:image/png;base64,xxxx") is False
     assert is_in_scope_src("{logo}") is False
     assert is_in_scope_src("") is False
+
+
+# ── Image loader ───────────────────────────────────────────────────────────────
+
+def test_loader_accepts_valid_png_via_injected_http():
+    loader = ImageLoader(http_get=lambda url: _png_bytes())
+    loaded = loader.load("https://x/a.png")
+    assert loaded is not None
+    assert loaded.media_type == "image/png"
+    assert (loaded.width, loaded.height) == (8, 8)
+    assert loaded.b64
+
+
+def test_loader_rejects_non_image():
+    loader = ImageLoader(http_get=lambda url: b"<html>not an image</html>")
+    assert loader.load("https://x/a.png") is None
+
+
+def test_loader_rejects_oversized():
+    big = _png_bytes(size=(2, 2)) + b"\x00" * (6 * 1024 * 1024)
+    loader = ImageLoader(http_get=lambda url: big)
+    assert loader.load("https://x/a.png") is None
+
+
+def test_loader_skips_out_of_scope_src():
+    loader = ImageLoader(http_get=lambda url: _png_bytes())
+    assert loader.load("data:image/png;base64,zzz") is None
+    assert loader.load("{logo}") is None
+
+
+def test_loader_reads_local_file(tmp_path):
+    p = tmp_path / "pic.png"
+    p.write_bytes(_png_bytes())
+    loader = ImageLoader()
+    loaded = loader.load("pic.png", base_dir=tmp_path)
+    assert loaded is not None and loaded.media_type == "image/png"
+
+
+# ── Vision evaluator (fake completer) ──────────────────────────────────────────
+
+def _fake_vision(json_text):
+    async def _c(prompt, image_b64, media_type):
+        return json_text
+    return _c
+
+
+def test_vision_eval_parses_weak_verdict():
+    ev = VisionEvaluator(_fake_vision(
+        '{"verdict":"weak","score":0.3,"reasons":["filename used"],'
+        '"suggested_alt":"Red square logo"}'
+    ))
+    img = extract_images('<img src="logo.png" alt="logo.png">')[0]
+    loaded = ImageLoader(http_get=lambda u: _png_bytes()).load("https://x/logo.png")
+    res = asyncio.run(ev.evaluate(img, loaded, ImageRole.INFORMATIVE))
+    assert res.verdict == AltVerdict.WEAK
+    assert res.suggested_alt == "Red square logo"
+    assert res.reasons == ["filename used"]
+
+
+def test_vision_eval_pass_drops_suggestion():
+    ev = VisionEvaluator(_fake_vision(
+        'Here you go:\n{"verdict":"pass","score":0.95,"suggested_alt":"x"}'
+    ))
+    img = extract_images('<img src="a.png" alt="A red square">')[0]
+    loaded = ImageLoader(http_get=lambda u: _png_bytes()).load("https://x/a.png")
+    res = asyncio.run(ev.evaluate(img, loaded, ImageRole.INFORMATIVE))
+    assert res.verdict == AltVerdict.PASS
+    assert res.suggested_alt is None      # nothing to suggest when it passes
+
+
+def test_vision_eval_handles_bad_json_gracefully():
+    ev = VisionEvaluator(_fake_vision("the model rambled, no json"))
+    img = extract_images('<img src="a.png">')[0]
+    loaded = ImageLoader(http_get=lambda u: _png_bytes()).load("https://x/a.png")
+    res = asyncio.run(ev.evaluate(img, loaded, ImageRole.INFORMATIVE))
+    # No usable alt + unparseable response → missing, not a crash.
+    assert res.verdict == AltVerdict.MISSING
+
+
+# ── Orchestrator ───────────────────────────────────────────────────────────────
+
+def test_orchestrator_skips_decorative_without_loading():
+    # If a decorative image were loaded/evaluated this fake would explode.
+    def boom(url):
+        raise AssertionError("decorative image must not be fetched")
+    loader = ImageLoader(http_get=boom)
+    ev = VisionEvaluator(_fake_vision('{"verdict":"pass"}'))
+    content = '<img src="bg.png" aria-hidden="true">'
+    res = asyncio.run(describe_content(content, "f.html", loader=loader, evaluator=ev))
+    assert len(res) == 1
+    assert res[0].verdict == AltVerdict.SKIPPED
+    assert res[0].role == ImageRole.DECORATIVE
+
+
+def test_orchestrator_evaluates_informative_image():
+    loader = ImageLoader(http_get=lambda u: _png_bytes())
+    ev = VisionEvaluator(_fake_vision('{"verdict":"missing","suggested_alt":"A red square"}'))
+    content = '<img src="https://x/photo.png">'
+    res = asyncio.run(describe_content(content, "f.html", loader=loader, evaluator=ev))
+    assert res[0].verdict == AltVerdict.MISSING
+    assert res[0].suggested_alt == "A red square"
+
+
+def test_orchestrator_no_evaluator_marks_skipped():
+    loader = ImageLoader(http_get=lambda u: _png_bytes())
+    content = '<img src="https://x/photo.png">'
+    res = asyncio.run(describe_content(content, "f.html", loader=loader, evaluator=None))
+    assert res[0].verdict == AltVerdict.SKIPPED
+    assert "evaluator unavailable" in (res[0].note or "")
