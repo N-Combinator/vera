@@ -1,0 +1,34 @@
+name: Accessibility (Vera)
+
+# Posts Vera's accessibility findings as inline review comments on each PR.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write     # required to post review comments
+
+jobs:
+  vera-a11y:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Vera core
+        working-directory: src/packages/core
+        run: pip install -r requirements.txt
+
+      - name: Vera accessibility review
+        working-directory: src/packages/core
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          VERA_SCAN_PATH: ${{ github.workspace }}/src
+          VERA_FAIL_ON_CRITICAL: "true"
+        run: python -m vera.pr_report

@@ -269,3 +269,103 @@ def _render_summary(summary: List[dict], inline_count: int) -> str:
         lines.append("")
         lines.append("✅ No accessibility issues found.")
     return "\n".join(lines)
+
+
+# ── Orchestration + GitHub Actions entry point ─────────────────────────────────
+
+async def _scan_violations(scan_path: str) -> List[dict]:
+    """Run Vera's scanner and return violations as plain dicts."""
+    from .config_loader import load_config
+    from .scanner import Scanner
+
+    cfg = load_config()
+    scanner = Scanner(config=cfg, llm=None)     # heuristics only in CI by default
+    result = await scanner.scan(scan_path)
+    return [v.model_dump() for v in result.violations]
+
+
+async def run(
+    *,
+    repo: str,
+    pr_number: int,
+    token: str,
+    scan_path: str = ".",
+    client: Optional[GitHubPRClient] = None,
+    violations: Optional[List[dict]] = None,
+) -> dict:
+    """Scan, map findings onto the PR diff, and post a single review.
+
+    `client` and `violations` are injectable so the whole flow is unit-testable
+    without GitHub or a real scan.
+    """
+    client = client or GitHubPRClient(token, repo)
+    if violations is None:
+        violations = await _scan_violations(scan_path)
+
+    files = client.get_pr_files(pr_number)
+    diff_maps = build_diff_maps(files)
+    existing = client.get_review_comments(pr_number)
+    review = build_review(violations, diff_maps, existing)
+
+    # Only call the API when there is something new to say (avoids empty reviews
+    # on every re-run once all findings are already commented).
+    if review["comments"] or review["summary_count"] or not existing:
+        client.create_review(pr_number, review["body"], review["comments"])
+
+    review["violations"] = violations
+    return review
+
+
+def _pr_number_from_env() -> Optional[int]:
+    """Resolve the PR number from the GitHub Actions event payload or refs."""
+    import json
+    import os
+
+    path = os.getenv("GITHUB_EVENT_PATH")
+    if path and os.path.exists(path):
+        try:
+            with open(path) as f:
+                event = json.load(f)
+            if "pull_request" in event:
+                return int(event["pull_request"]["number"])
+            if "number" in event:
+                return int(event["number"])
+        except Exception:
+            pass
+    ref = os.getenv("GITHUB_REF", "")          # refs/pull/<n>/merge
+    m = re.search(r"refs/pull/(\d+)/", ref)
+    return int(m.group(1)) if m else None
+
+
+def main() -> int:
+    import asyncio
+    import logging
+    import os
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    log = logging.getLogger("vera.pr_report")
+
+    token = os.getenv("GITHUB_TOKEN")
+    repo = os.getenv("GITHUB_REPOSITORY")      # "owner/name"
+    scan_path = os.getenv("VERA_SCAN_PATH", ".")
+    pr_number = _pr_number_from_env()
+
+    if not (token and repo and pr_number):
+        log.error("[vera] need GITHUB_TOKEN, GITHUB_REPOSITORY and a PR context; skipping.")
+        return 0                                # no-op on non-PR events
+
+    review = asyncio.run(run(repo=repo, pr_number=pr_number, token=token, scan_path=scan_path))
+    log.info(f"[vera] posted {review['inline_count']} inline + "
+             f"{review['summary_count']} summary finding(s) on PR #{pr_number}")
+
+    if os.getenv("VERA_FAIL_ON_CRITICAL", "").lower() in ("1", "true", "yes"):
+        criticals = [v for v in review.get("violations", []) if v.get("severity") == "critical"]
+        if criticals:
+            log.error(f"[vera] {len(criticals)} critical accessibility issue(s) — failing.")
+            return 1
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())

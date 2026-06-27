@@ -6,6 +6,7 @@ from vera.pr_report import (
     build_diff_maps,
     build_review,
     format_comment,
+    run,
 )
 
 
@@ -179,3 +180,58 @@ def test_reporter_clean_pr_message():
     maps = build_diff_maps(DIFF_FILES)
     review = build_review([], maps)
     assert "No accessibility issues" in review["body"]
+
+
+# ── End-to-end run() with a fake client ────────────────────────────────────────
+
+import asyncio
+
+
+class FakeClient:
+    def __init__(self, files, existing=None):
+        self._files = files
+        self._existing = existing or []
+        self.posted = None
+
+    def get_pr_files(self, pr):
+        return self._files
+
+    def get_review_comments(self, pr):
+        return self._existing
+
+    def create_review(self, pr, body, comments, event="COMMENT"):
+        self.posted = {"pr": pr, "body": body, "comments": comments}
+        return {"id": 99}
+
+
+def test_run_posts_inline_and_summary():
+    client = FakeClient(DIFF_FILES)
+    violations = [
+        _viol("missing-alt", "src/App.jsx", 12),    # on added line → inline
+        _viol("color-contrast", "src/App.jsx", 0),  # line=0 → summary (B4)
+    ]
+    review = asyncio.run(run(
+        repo="org/vera", pr_number=7, token="t",
+        client=client, violations=violations,
+    ))
+    assert review["inline_count"] == 1
+    assert review["summary_count"] == 1
+    assert client.posted is not None
+    assert client.posted["comments"][0]["position"] == 8
+    assert "color-contrast" in client.posted["body"]
+
+
+def test_run_rerun_is_idempotent():
+    # Existing comment already covers the only inline finding → nothing new posted.
+    existing = [{
+        "path": "src/App.jsx", "position": 8,
+        "body": format_comment(_viol("missing-alt", "src/App.jsx", 12)),
+    }]
+    client = FakeClient(DIFF_FILES, existing=existing)
+    review = asyncio.run(run(
+        repo="org/vera", pr_number=7, token="t",
+        client=client, violations=[_viol("missing-alt", "src/App.jsx", 12)],
+    ))
+    assert review["inline_count"] == 0
+    # No summary findings + comment already exists → no new review posted.
+    assert client.posted is None
