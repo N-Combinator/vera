@@ -398,52 +398,53 @@ export VERA_LOG_LEVEL=info
 export VERA_FAIL_ON_CRITICAL=true
 ```
 
-#### 9. CI/CD Integration
+#### 9. CI/CD Integration — PR review comments
 
-**GitHub Actions Example:**
+Vera posts its findings as **inline review comments on each pull request** —
+annotations land on the exact changed lines, and anything off the diff (including
+LLM-detected issues without a line number) is collected into a single summary
+comment. Re-runs are **idempotent**: a finding already commented is not posted again.
 
-Create `.github/workflows/accessibility.yml`:
+The workflow lives at [`.github/workflows/accessibility.yml`](.github/workflows/accessibility.yml):
 
 ```yaml
-name: Accessibility Check
+name: Accessibility (Vera)
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write          # required to post review comments
 
 jobs:
-  accessibility:
+  vera-a11y:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-python@v5
         with:
-          node-version: '18'
-      
-      - name: Install Vera CLI
-        run: npm install -g @vera-dev/cli
-      
-      - name: Run accessibility scan
-        run: vera scan ./src --output report.json
-      
-      - name: Fail on critical violations
-        run: |
-          CRITICAL=$(jq '[.violations[] | select(.severity=="critical")] | length' report.json)
-          if [ "$CRITICAL" -gt 0 ]; then
-            echo "❌ Critical accessibility issues found!"
-            jq '.violations[] | select(.severity=="critical")' report.json
-            exit 1
-          fi
-      
-      - name: Upload report
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: accessibility-report
-          path: report.json
+          python-version: "3.12"
+      - name: Install Vera core
+        working-directory: src/packages/core
+        run: pip install -r requirements.txt
+      - name: Vera accessibility review
+        working-directory: src/packages/core
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          VERA_SCAN_PATH: ${{ github.workspace }}/src
+          VERA_FAIL_ON_CRITICAL: "true"   # fail the check on critical issues
+        run: python -m vera.pr_report
 ```
+
+**Notes**
+- Needs `pull-requests: write`; the default `GITHUB_TOKEN` is sufficient.
+- Inline comments are placed only on lines the PR **added** (where they are
+  actionable); other findings go to the summary so nothing is silently dropped.
+- Set `VERA_FAIL_ON_CRITICAL: "true"` to block merges on `critical` violations.
 
 **Pre-Commit Hook:**
 
