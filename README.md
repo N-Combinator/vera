@@ -524,6 +524,48 @@ vera --version
 
 ---
 
+## 🖼️ Vera-Describe — AI alt-text quality (opt-in)
+
+Vera-Describe is an **opt-in** module that reviews the **quality** of existing `alt`
+text against the **real image** using Claude Vision, mapping to **WCAG 1.1.1
+(Non-text Content)**. It is off by default — nothing changes unless you call it.
+
+```bash
+# Review alt text on a URL, a file, or a directory
+vera describe ./src
+vera describe https://example.com
+vera check-alt ./public/index.html      # alias
+
+# Save a JSON report
+vera describe ./src --output alt-report.json
+
+# CI mode: exit non-zero if any image is weak/missing
+vera describe ./src --quiet
+```
+
+Set the key via `--api-key` or `ANTHROPIC_API_KEY` (default model
+`claude-sonnet-4-6`). Without a key, Vera-Describe still reports image structure and
+which images are decorative, but cannot grade the pixels.
+
+**How it works** — per `<img>`:
+1. **Classify role** → `decorative` / `informative` / `functional` / `complex`.
+   Decorative images (`aria-hidden`, `role="presentation"`, explicit `alt=""`) are
+   **never described** — over-describing decoration is itself a WCAG failure.
+2. **Load the image** (URL via httpx, or local path), validated with Pillow.
+3. **Claude Vision** scores the existing alt by a rubric — **accuracy, brevity,
+   no-filename, context-match** — returning `pass | weak | missing` plus a
+   `suggested_alt`.
+
+**Guarantees**
+- **Suggest-only.** Vera-Describe **never writes files** and never auto-applies alt
+  text — alt text is editorial, so a human decides.
+- **Opt-in.** No behaviour change to `scan`/`fix` unless you run `describe`.
+
+**Out of MVP scope** (skipped gracefully): `data:` URIs, CSS background images,
+`<svg>`/`<canvas>`, bundler imports (`import x from './a.png'`), auto-PR, batch crawl.
+
+---
+
 ## 📚 Project Structure
 
 ```

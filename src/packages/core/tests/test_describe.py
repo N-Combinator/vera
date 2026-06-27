@@ -232,3 +232,50 @@ def test_orchestrator_no_evaluator_marks_skipped():
     res = asyncio.run(describe_content(content, "f.html", loader=loader, evaluator=None))
     assert res[0].verdict == AltVerdict.SKIPPED
     assert "evaluator unavailable" in (res[0].note or "")
+
+
+# ── Integration over a realistic fixture ───────────────────────────────────────
+
+import os
+from vera.describe import ImageRole as _Role
+
+
+def _load_fixture():
+    here = os.path.dirname(__file__)
+    with open(os.path.join(here, "fixtures", "describe_sample.html")) as f:
+        return f.read()
+
+
+def test_fixture_decoratives_skipped_and_never_fetched():
+    fetched = []
+
+    def track(url):
+        fetched.append(url)
+        return _png_bytes()
+
+    loader = ImageLoader(http_get=track)
+    ev = VisionEvaluator(_fake_vision('{"verdict":"weak","suggested_alt":"x"}'))
+    res = asyncio.run(describe_content(_load_fixture(), "fix.html", loader=loader, evaluator=ev))
+
+    # 3 decorative + 1 data-uri are skipped; none of those srcs were fetched.
+    skipped = [e for e in res if e.verdict == AltVerdict.SKIPPED]
+    assert len(skipped) >= 4
+    assert not any("spacer" in u or "divider" in u or "bg-texture" in u for u in fetched)
+    assert not any(u.startswith("data:") for u in fetched)
+
+
+def test_fixture_roles_classified():
+    loader = ImageLoader(http_get=lambda u: _png_bytes())
+    ev = VisionEvaluator(_fake_vision('{"verdict":"weak","suggested_alt":"x"}'))
+    res = asyncio.run(describe_content(_load_fixture(), "fix.html", loader=loader, evaluator=ev))
+    roles = {e.src: e.role for e in res}
+    assert roles["https://example.com/home-icon.png"] == _Role.FUNCTIONAL
+    assert roles["https://example.com/sales-chart.png"] == _Role.COMPLEX
+    assert roles["https://example.com/team-photo.jpg"] == _Role.INFORMATIVE
+
+
+def test_fixture_multiline_banner_found():
+    loader = ImageLoader(http_get=lambda u: _png_bytes())
+    ev = VisionEvaluator(_fake_vision('{"verdict":"missing"}'))
+    res = asyncio.run(describe_content(_load_fixture(), "fix.html", loader=loader, evaluator=ev))
+    assert any("banner.png" in e.src for e in res)
