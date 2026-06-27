@@ -130,6 +130,39 @@ export class VeraApiClient {
   async listReports(): Promise<object[]> {
     return this.request<object[]>("GET", "/reports");
   }
+
+  async describe(req: DescribeRequest): Promise<DescribeResponse> {
+    return this.request<DescribeResponse>("POST", "/describe", req);
+  }
+}
+
+// ── Vera-Describe (opt-in) ─────────────────────────────────────────────────────
+
+export interface DescribeRequest {
+  path: string;
+  api_key?: string;
+  model?: string;
+}
+
+export interface AltEvaluation {
+  src: string;
+  file: string;
+  line: number;
+  role: string;
+  verdict: "pass" | "weak" | "missing" | "skipped";
+  score: number;
+  reasons: string[];
+  existing_alt?: string | null;
+  suggested_alt?: string | null;
+  note?: string | null;
+}
+
+export interface DescribeResponse {
+  target: string;
+  images_found: number;
+  summary: { pass: number; weak: number; missing: number; skipped: number };
+  evaluations: AltEvaluation[];
+  human_summary: string;
 }
 
 // ── Singleton ─────────────────────────────────────────────────────────────────

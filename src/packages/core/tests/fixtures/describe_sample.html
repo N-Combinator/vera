@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>Vera-Describe fixture</title></head>
+<body>
+  <!-- decorative: aria-hidden -> SKIPPED, never fetched -->
+  <img src="spacer.gif" aria-hidden="true">
+
+  <!-- decorative: explicit empty alt -> SKIPPED -->
+  <img src="divider.png" alt="">
+
+  <!-- decorative: role=presentation -> SKIPPED -->
+  <img src="bg-texture.png" role="presentation">
+
+  <!-- informative, no alt -> evaluated (missing) -->
+  <img src="https://example.com/team-photo.jpg">
+
+  <!-- informative, weak alt (filename) -> evaluated -->
+  <img src="https://example.com/IMG_4821.jpg" alt="IMG_4821.jpg">
+
+  <!-- functional: image is the link label -> evaluated, role=functional -->
+  <a href="/home"><img src="https://example.com/home-icon.png"></a>
+
+  <!-- complex: chart -> evaluated, role=complex -->
+  <figure>
+    <img src="https://example.com/sales-chart.png" alt="chart">
+    <figcaption>Q2 sales by region</figcaption>
+  </figure>
+
+  <!-- out of scope: data URI -> SKIPPED -->
+  <img src="data:image/png;base64,iVBORw0KGgo=">
+
+  <!-- multi-line tag (audit B1) -> still found -->
+  <img
+    src="https://example.com/banner.png"
+    width="600"
+  >
+</body>
+</html>

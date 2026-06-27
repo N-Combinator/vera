@@ -184,6 +184,45 @@ async def list_reports():
     ]
 
 
+# ── Vera-Describe (opt-in alt-text quality module) ────────────────────────────
+
+@app.post("/describe")
+async def describe(req: dict):
+    """Opt-in AI alt-text review (WCAG 1.1.1). Suggest-only; never writes files.
+
+    Body: {"path": "<url|file|dir>", "api_key"?: "...", "model"?: "..."}.
+    Off by default — the CLI only calls this under --describe/--check-alt.
+    """
+    from .describe import run_describe
+
+    target = req.get("path")
+    if not target:
+        raise HTTPException(status_code=400, detail="`path` is required")
+
+    api_key = req.get("api_key") or os.getenv("ANTHROPIC_API_KEY")
+    try:
+        report = await run_describe(target, api_key=api_key, model=req.get("model"))
+    except Exception as e:
+        logger.error(f"[API] Describe failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Describe failed: {str(e)}")
+
+    logger.info(
+        f"[API] Describe complete: {report.images_found} images | "
+        f"pass={report.passed} weak={report.weak} missing={report.missing} "
+        f"skipped={report.skipped}"
+    )
+    return {
+        "target": report.target,
+        "images_found": report.images_found,
+        "summary": {
+            "pass": report.passed, "weak": report.weak,
+            "missing": report.missing, "skipped": report.skipped,
+        },
+        "evaluations": [e.model_dump() for e in report.evaluations],
+        "human_summary": report.human_summary(),
+    }
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
