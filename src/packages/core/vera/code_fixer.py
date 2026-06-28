@@ -95,6 +95,26 @@ def _escape_attr(value: str) -> str:
     return value.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;")
 
 
+def _resolve_root(target: Optional[str]) -> Optional[Path]:
+    """The directory writes are jailed to: the target itself if a dir, else its parent."""
+    if not target:
+        return None
+    try:
+        p = Path(target).resolve()
+    except Exception:
+        return None
+    return p if p.is_dir() else p.parent
+
+
+def _within_root(path: Path, root: Path) -> bool:
+    """True if ``path`` resolves to a location inside ``root`` (blocks ../ traversal)."""
+    try:
+        resolved = path.resolve()
+    except Exception:
+        return False
+    return resolved == root or root in resolved.parents
+
+
 def _is_jsx(filepath: Optional[str]) -> bool:
     return bool(filepath) and filepath.lower().endswith((".jsx", ".tsx"))
 
@@ -332,11 +352,18 @@ class CodeFixer:
         scan_result: ScanResult,
         violation_ids: Optional[List[str]],
         dry_run: bool = False,
+        root: Optional[str] = None,
     ) -> FixResponse:
-        """Apply fixes for a set of violations from a scan."""
+        """Apply fixes for a set of violations from a scan.
+
+        ``root`` jails all writes: any target file resolving outside it is
+        skipped (security S2). Defaults to the scan target's directory.
+        """
         violations = scan_result.violations
         if violation_ids is not None:
             violations = [v for v in violations if v.id in violation_ids]
+
+        allowed_root = _resolve_root(root if root is not None else scan_result.target)
 
         # Group violations by file
         by_file: Dict[str, List[Violation]] = {}
@@ -352,6 +379,10 @@ class CodeFixer:
         for filepath, file_violations in by_file.items():
             try:
                 path = Path(filepath)
+                if allowed_root is not None and not _within_root(path, allowed_root):
+                    errors.append(f"Refused to fix outside root: {filepath}")
+                    skipped_count += len(file_violations)
+                    continue
                 if not path.exists():
                     errors.append(f"File not found: {filepath}")
                     skipped_count += len(file_violations)
