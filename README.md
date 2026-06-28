@@ -1,621 +1,118 @@
 # Vera — AI-Powered Accessibility Auto-Remediator
 
-> Find accessibility issues in your code. Fix them automatically. Ship inclusive software.
+Vera scans web code (HTML, JSX/TSX, Vue) for WCAG 2.2 accessibility issues and helps you
+fix them — deterministic code patches, AI alt-text review via Claude Vision, and inline
+review comments in your pull requests.
 
 ---
 
-## 🌐 What is Vera?
+## Features
 
-Vera (Verify & Access) is an open-source, AI-powered tool that automates accessibility remediation for web code. It scans React, Vue, HTML/JSX projects and **generates production-ready code fixes** for accessibility violations — no manual work required. Vera supports both local LLMs (privacy-first) and cloud APIs (speed/accuracy-first).
-
-### 🌟 Key Features
-
-- ✅ **Auto-fix generation**: Not just scanning — Vera writes the actual code patches
-- ✅ **Dual-layer workflow**: CLI for developers + interactive dashboard for teams
-- ✅ **CI/CD native**: Pre-commit hooks and GitHub Actions integration
-- ✅ **WCAG 2.2 compliant**: 10 core rules (contrast, ARIA, keyboard traps)
-
-### 🔍 Why Vera?
-
-> *"We live in an era where accessibility will be mandated. Vera helps developers build inclusive apps at scale."*
-
-**Empowers development teams to:**
-- Fix accessibility issues *automatically* in codebases
-- Maintain strict privacy with optional local LLMs
-- Ship inclusive software faster through hybrid AI
-- Integrate seamlessly into development workflows
+- **Scan** — fast heuristic checks for missing alt text, unlabeled inputs, duplicate IDs,
+  empty headings, interactive elements without roles, and more.
+- **Fix** — safe, opt-in code patches. Dry-run by default; only writes with `--apply`. A
+  fixer that can't produce a correct change skips it rather than guessing.
+- **Describe** — Claude Vision grades each image's alt text against the actual pixels and
+  suggests a real description (suggest-only, never writes).
+- **PR comments** — a GitHub Action posts findings as inline review comments on the diff.
+- **Local or cloud LLM** — Ollama (private) or OpenAI / Anthropic / OpenRouter.
+- **Dashboard** — optional web UI for browsing issues and before/after diffs.
 
 ---
 
-## 🏗️ Architecture
+## Install
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    vera CLI (Node.js)                                   │
-│                                                                         │
-│  vera init  →  vera scan  →  vera fix  →  vera ui                     │
-│                     │             │                                     │
-│             HTTP Client    HTTP Client                                 │
-└──────────────────────┬──────────────┬─────────────────────────────────┘
-                       │            │
-                       ▼            ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│         Vera Backend (Python FastAPI + LLM Bridge)                      │
-│                                                                         │
-│  POST /scan  ──► Scanner (Heuristics + LLM)                            │
-│  POST /fix   ──► CodeFixer (AST patching + LLM)                        │
-│  GET /health                                                            │
-│                                                                         │
-│  LLM Routing (configured in .verarc.json):                              │
-│  • Ollama (Llama 3)       ← local, private                             │
-│  • OpenAI (GPT-4o)        ← cloud recommended                          │
-│  • Anthropic (Claude)     ← cloud fallback                             │
-│  • OpenRouter             ← aggregator                                 │
-└──────────────────────┬───────────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│         React Dashboard UI (port 3000)                                   │
-│                                                                         │
-│  • Visual issue cards   • Before/after diffs                           │
-│  • One-click apply      • Scan history & export                        │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+Requires **Node.js 18+** and **Python 3.12+** (Docker optional).
 
-### 📋 Rules (WCAG 2.2)
-
-| Rule ID | Description | WCAG | Severity |
-|---------|-------------|------|----------|
-| `missing-alt` | `<img>` missing alt text | 1.1.1 | Serious |
-| `missing-label` | Input without label/aria-label | 1.3.1 | Serious |
-| `color-contrast` | Text contrast < 4.5:1 | 1.4.3 | Serious |
-| `aria-hidden-body` | `body` with `aria-hidden=true` | 4.1.2 | Critical |
-| `duplicate-id` | Duplicate `id` attributes | 4.1.1 | Moderate |
-| `empty-heading` | `<h1>-<h6>` with no content | 2.4.6 | Moderate |
-| `label-associated` | Label not linked to input | 1.3.1 | Serious |
-| `missing-role` | Interactive div/span without role | 4.1.2 | Moderate |
-| `keyboard-trap` | Focus cannot leave component | 2.1.2 | Critical |
-| `focusable-hidden` | Focusable element hidden from AT | 4.1.2 | Serious |
-
----
-
-## 🔧 Installation & Usage Guide
-
-### System Requirements
-
-- **Node.js 18+** — Required for CLI
-- **Python 3.12+** — Required for backend (if running locally)
-- **Docker Compose** — Optional, for containerized setup (recommended)
-- **Ollama** — Optional, for local LLM support OR cloud API keys (OpenAI, Anthropic)
-
----
-
-### Quick Start (Development)
-
-**Step 1: Clone the Repository**
 ```bash
-git clone https://github.com/cprite/daily-project-vera-2026-04-06.git
-cd daily-project-vera-2026-04-06
-```
-
-**Step 2: Install & Build CLI**
-```bash
+# 1. Build the CLI
 cd src/packages/cli
+npm install && npm run build
 
-# Install dependencies
-npm install
-
-# Compile TypeScript to JavaScript
-npm run build
+# 2. Start the backend (pick one)
+docker-compose up -d                                   # from repo root, or:
+cd ../core && pip install -r requirements.txt \
+  && uvicorn vera.api:app --port 8000                  # manual
 ```
 
-**Step 2b: Make vera Command Accessible (Choose One)**
+Then call the CLI via the compiled binary (alias it for convenience):
 
-*Option A: node (Easiest, after build)*
 ```bash
-# From any directory, use the compiled version:
-node /path/to/vera/src/packages/cli/dist/bin/vera.js scan ./src
-
-# Example:
-node /Users/niknmirosh/Documents/cprite/vera/src/packages/cli/dist/bin/vera.js scan test/
-```
-
-*Option A2: npm run (from CLI directory)*
-```bash
-cd /path/to/vera/src/packages/cli
-npm start scan ./src
-
-# Example:
-cd /Users/niknmirosh/Documents/cprite/vera/src/packages/cli
-npm start scan test/
-```
-
-*Option B: npm link (if you have permissions)*
-```bash
-cd src/packages/cli
-npm link
-# Then use: vera scan ./src
-```
-
-*Option C: Shell Alias (Recommended for macOS/Linux)*
-```bash
-# Add this to ~/.zshrc or ~/.bashrc
-alias vera='node /absolute/path/to/vera/src/packages/cli/dist/bin/vera.js'
-
-# Then reload: source ~/.zshrc
-# Now use: vera scan ./src
-```
-
-*Option D: Add compiled bin to PATH*
-```bash
-# Note: You must run 'npm run build' in src/packages/cli first
-# Then add to ~/.zshrc or ~/.bashrc
-export PATH="$PATH:/absolute/path/to/vera/src/packages/cli/dist/bin"
-
-# Then reload: source ~/.zshrc
-# Now use: vera scan ./src
-```
-
-**Step 3: Set Up Backend**
-
-Choose one:
-
-**Option A: Docker (Recommended)**
-```bash
-# From project root
-docker-compose up -d
-# Backend at http://localhost:8000
-# Dashboard at http://localhost:3000
-```
-
-**Option B: Manual Python Setup**
-```bash
-cd src/packages/core
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Start backend
-uvicorn vera.api:app --host 0.0.0.0 --port 8000 --reload
-```
-
-**Step 4: Test Installation**
-```bash
-# Using node with compiled version
-node ./src/packages/cli/dist/bin/vera.js --version
-node ./src/packages/cli/dist/bin/vera.js scan test/
-
-# Or from CLI directory:
-cd src/packages/cli
-npm start --version
-npm start scan test/
-
-# Or if you set up alias:
-vera --version
-vera scan test/
-```
-
----
-
-### Detailed Installation Steps
-
-#### 1. Install & Build the CLI
-
-**For Development (from local clone):**
-```bash
-cd src/packages/cli
-
-# Install dependencies
-npm install
-
-# Build TypeScript to JavaScript
-npm run build
-
-# Optional: Link globally (requires permissions)
-npm link
-```
-
-**For Production (future, when published to npm):**
-```bash
-npm install -g @vera-dev/cli
-```
-
-Verify:
-```bash
+alias vera='node /abs/path/to/src/packages/cli/dist/bin/vera.js'
 vera --version
 ```
 
-#### 2. Install Python Backend
+---
 
-**With Docker Compose:**
-```bash
-# From project root
-docker-compose up -d
-```
-
-**Without Docker (Local):**
-```bash
-cd src/packages/core
-
-# Create virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Start backend with auto-reload
-uvicorn vera.api:app --reload
-
-# Or with specific host/port
-uvicorn vera.api:app --host 0.0.0.0 --port 8000 --reload
-```
-
-#### 3. Initialize Vera in Your Project
+## Usage
 
 ```bash
-cd /path/to/your/project
-vera init
+vera init                      # create .verarc.json config
+vera scan ./src                # report violations (add --no-llm for heuristics only)
+vera scan ./src -f json -o report.json
+
+vera fix ./src                 # preview fixes (dry run — writes nothing)
+vera fix ./src --apply         # apply fixes to disk
+vera fix ./src --apply --yes   # skip the confirmation prompt
+
+vera describe ./page.html      # AI alt-text review (needs ANTHROPIC_API_KEY)
+vera ui                        # launch the dashboard at :3000
 ```
 
-Interactive setup:
-```
-? Do you want to use a local LLM? (Y/N): Y
-? Which model? (llama3/mistral/neural-chat): llama3
-? Use cloud API fallback? (Y/N): Y
-? Which API provider? (openai/anthropic/openrouter): openai
-? Enter your OpenAI API key: ••••••••••••••••••••••••••
-? Target framework? (react/vue/vanilla): react
-```
+**`fix` is safe by design:** it's a dry run unless you pass `--apply`, and it only makes
+changes it can make *correctly* — e.g. it derives an input's label from its `placeholder`
+rather than inventing a generic one, and never marks an informative image decorative.
 
-Creates:
-- `.verarc.json` — Configuration file
-- `.vera/` — Setup and model directory
-- `.env` — Local API keys (git-ignored)
+### CI / pull requests
 
-#### 4. Run Your First Scan
-
-```bash
-# Basic scan (JSON output to console)
-vera scan ./src
-
-# Output example:
-# {
-#   "violations": [
-#     {
-#       "id": 1,
-#       "rule": "missing-alt",
-#       "element": "img.logo",
-#       "severity": "serious",
-#       "description": "Image missing alt text"
-#     }
-#   ],
-#   "summary": {
-#     "total": 5,
-#     "critical": 1,
-#     "serious": 2
-#   }
-# }
-```
-
-#### 5. Preview and Apply Fixes
-
-```bash
-# Dry run: show proposed changes
-vera fix ./src
-
-# Shows colored diff output:
-# ✓ [missing-alt] img.logo
-#   + alt="Company Logo"
-
-# Apply fixes with confirmation
-vera fix ./src --apply
-
-# Auto-approve all fixes (skip prompts)
-vera fix ./src --apply --yes
-
-# Apply only specific violations
-vera fix ./src --apply --violations abc123,def456
-```
-
-#### 6. Launch the Interactive Dashboard
-
-```bash
-# Start dashboard at http://localhost:3000
-vera ui
-
-# Open on custom port
-vera ui --port 4000
-
-# Launch without opening browser
-vera ui --no-open
-```
-
-Dashboard features:
-- Visual issue cards with severity levels
-- Before/after code comparison
-- One-click apply fixes
-- Export reports (JSON, HTML, CSV)
-- Scan history and trending
-
-#### 7. Configuration (`.verarc.json`)
-
-```json
-{
-  "framework": "react",
-  "llm": {
-    "provider": "openai",
-    "model": "gpt-4o-mini",
-    "endpoint": "https://api.openai.com/v1",
-    "temperature": 0.7,
-    "maxTokens": 2000
-  },
-  "rules": [
-    "missing-alt",
-    "missing-label",
-    "color-contrast",
-    "aria-hidden-body",
-    "duplicate-id",
-    "empty-heading",
-    "label-associated",
-    "missing-role",
-    "keyboard-trap",
-    "focusable-hidden"
-  ],
-  "fixMode": "auto-apply",
-  "confidenceThreshold": 0.75,
-  "ignorePaths": [
-    "node_modules",
-    "dist",
-    "build",
-    ".next"
-  ],
-  "autoCommit": true,
-  "deepScan": true,
-  "maxFailures": 10
-}
-```
-
-#### 8. Environment Variables
-
-```bash
-# LLM Configuration
-export VERA_LLM_PROVIDER=openai
-export VERA_LLM_MODEL=gpt-4o-mini
-export VERA_LLM_ENDPOINT=https://api.openai.com/v1
-export OPENAI_API_KEY=sk-...
-export ANTHROPIC_API_KEY=sk-ant-...
-
-# Backend Configuration
-export VERA_BACKEND_URL=http://localhost:8000
-export VERA_LOG_LEVEL=info
-
-# CI/CD
-export VERA_FAIL_ON_CRITICAL=true
-```
-
-#### 9. CI/CD Integration — PR review comments
-
-Vera posts its findings as **inline review comments on each pull request** —
-annotations land on the exact changed lines, and anything off the diff (including
-LLM-detected issues without a line number) is collected into a single summary
-comment. Re-runs are **idempotent**: a finding already commented is not posted again.
-
-The workflow lives at [`.github/workflows/accessibility.yml`](.github/workflows/accessibility.yml):
+A ready-made workflow lives at `.github/workflows/accessibility.yml`. It scans changed
+files and posts inline comments on the PR:
 
 ```yaml
-name: Accessibility (Vera)
-
-on:
-  pull_request:
-    branches: [main]
-
-permissions:
-  contents: read
-  pull-requests: write          # required to post review comments
-
-jobs:
-  vera-a11y:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install Vera core
-        working-directory: src/packages/core
-        run: pip install -r requirements.txt
-      - name: Vera accessibility review
-        working-directory: src/packages/core
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_EVENT_PATH: ${{ github.event_path }}
-          VERA_SCAN_PATH: ${{ github.workspace }}/src
-          VERA_FAIL_ON_CRITICAL: "true"   # fail the check on critical issues
-        run: python -m vera.pr_report
-```
-
-**Notes**
-- Needs `pull-requests: write`; the default `GITHUB_TOKEN` is sufficient.
-- Inline comments are placed only on lines the PR **added** (where they are
-  actionable); other findings go to the summary so nothing is silently dropped.
-- Set `VERA_FAIL_ON_CRITICAL: "true"` to block merges on `critical` violations.
-
-**Pre-Commit Hook:**
-
-Add to `.husky/pre-commit`:
-
-```bash
-#!/bin/sh
-. "$(dirname "$0")/_/husky.sh"
-
-echo "🔍 Running accessibility check..."
-if ! vera scan ./src --quiet --no-llm; then
-  echo "❌ Accessibility issues found. Run 'vera fix ./src' to resolve."
-  exit 1
-fi
-echo "✅ Accessibility check passed!"
-```
-
-Install Husky:
-```bash
-npx husky-init && npm install
-npx husky add .husky/pre-commit 'vera scan ./src --quiet'
-```
-
-#### 10. Docker Compose Reference
-
-```bash
-# Start all services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f backend
-docker-compose logs -f dashboard
-
-# Stop services
-docker-compose down
-
-# Rebuild containers
-docker-compose up -d --build
-```
-
-#### 11. Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| `Cannot find module '/vera/src/packages/cli/bin/vera'` | Run `npm run build` in `src/packages/cli` first to compile TypeScript |
-| `vera: command not found` | Use `node ./src/packages/cli/dist/bin/vera.js` or add alias/PATH (see Step 2b) |
-| `npm link: EACCES permission denied` | Use `node ./src/packages/cli/dist/bin/vera.js` instead (no sudo needed) |
-| `Error: LLM model not found` | Run `ollama run llama3` to download |
-| `API key invalid` | Check `echo $OPENAI_API_KEY` or update `.verarc.json` |
-| `Port 3000 already in use` | Run `vera ui --port 4000` or find process with `lsof -i :3000` |
-| `Backend connection refused` | Ensure backend running: `curl http://localhost:8000/health` |
-| `No violations found` | Check that directory contains `.jsx`, `.tsx`, or `.html` files |
-| `Docker build fails` | Try `docker-compose up -d --build` to rebuild |
-| `TypeScript not compiled` | Run `npm run build` in `src/packages/cli` directory |
-| `Permission denied mkdir /usr/local/lib/node_modules` | You don't have write permissions. Use `node ./dist/bin/vera.js` method or create shell alias instead. |
-
-#### 12. Advanced Usage
-
-```bash
-# Generate HTML report
-vera scan ./src --output report.html --format html
-
-# Quiet mode (CI/CD)
-vera scan ./src --quiet
-
-# Verbose output with timing
-vera scan ./src --verbose
-
-# Dry run: test fixes without applying
-vera fix ./src --dry-run
-
-# Clean up local state
-vera clean
-
-# Check version
-vera --version
+- env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    VERA_FAIL_ON_CRITICAL: "true"   # fail the check on critical issues
+  run: python -m vera.pr_report
 ```
 
 ---
 
-## 🖼️ Vera-Describe — AI alt-text quality (opt-in)
+## Rules (WCAG 2.2)
 
-Vera-Describe is an **opt-in** module that reviews the **quality** of existing `alt`
-text against the **real image** using Claude Vision, mapping to **WCAG 1.1.1
-(Non-text Content)**. It is off by default — nothing changes unless you call it.
+Detected by fast heuristics (no LLM needed):
 
-```bash
-# Review alt text on a URL, a file, or a directory
-vera describe ./src
-vera describe https://example.com
-vera check-alt ./public/index.html      # alias
+| Rule | WCAG | Severity |
+|------|------|----------|
+| `missing-alt` — `<img>` without alt | 1.1.1 | Serious |
+| `missing-label` — input without an accessible name | 1.3.1 | Serious |
+| `label-associated` — label not linked to a control | 1.3.1 | Serious |
+| `aria-hidden-body` — `aria-hidden` on `<body>` | 4.1.2 | Critical |
+| `duplicate-id` — repeated `id` attribute | 4.1.1 | Moderate |
+| `empty-heading` — `<h1>`–`<h6>` with no text | 2.4.6 | Moderate |
+| `missing-role` — interactive `div`/`span` without a role | 4.1.2 | Moderate |
 
-# Save a JSON report
-vera describe ./src --output alt-report.json
-
-# CI mode: exit non-zero if any image is weak/missing
-vera describe ./src --quiet
-```
-
-Set the key via `--api-key` or `ANTHROPIC_API_KEY` (default model
-`claude-sonnet-4-6`). Without a key, Vera-Describe still reports image structure and
-which images are decorative, but cannot grade the pixels.
-
-**How it works** — per `<img>`:
-1. **Classify role** → `decorative` / `informative` / `functional` / `complex`.
-   Decorative images (`aria-hidden`, `role="presentation"`, explicit `alt=""`) are
-   **never described** — over-describing decoration is itself a WCAG failure.
-2. **Load the image** (URL via httpx, or local path), validated with Pillow.
-3. **Claude Vision** scores the existing alt by a rubric — **accuracy, brevity,
-   no-filename, context-match** — returning `pass | weak | missing` plus a
-   `suggested_alt`.
-
-**Guarantees**
-- **Suggest-only.** Vera-Describe **never writes files** and never auto-applies alt
-  text — alt text is editorial, so a human decides.
-- **Opt-in.** No behaviour change to `scan`/`fix` unless you run `describe`.
-
-**Out of MVP scope** (skipped gracefully): `data:` URIs, CSS background images,
-`<svg>`/`<canvas>`, bundler imports (`import x from './a.png'`), auto-PR, batch crawl.
+Additionally `color-contrast`, `keyboard-trap`, and `focusable-hidden` are detected only
+when an LLM pass is enabled (no standalone heuristic yet).
 
 ---
 
-## 📚 Project Structure
+## Architecture
 
 ```
-/src/packages
-  /cli          # Node.js CLI (@vera-dev/cli)
-  /core         # Python FastAPI backend
-    /vera
-      api.py          ← FastAPI server
-      scanner.py      ← File scanner (heuristic + LLM)
-      llm_bridge.py   ← LLM routing + prompting
-      code_fixer.py   ← Deterministic + LLM-powered fixes
-      models.py       ← Pydantic data models
-      config_loader.py ← .verarc.json loader
-  /dashboard    # React 18 + Redux + Tailwind UI
-.github/workflows/accessibility.yml
-docker-compose.yml
-.verarc.example
-README.md
-LICENSE
+vera CLI (Node/TS)  ──HTTP──►  FastAPI backend (Python)  ──►  LLM bridge
+  scan / fix / describe          /scan  /fix  /describe        Ollama · OpenAI
+  init / ui                                                    Anthropic · OpenRouter
+                                       │
+                                       └──►  React dashboard (:3000)
 ```
 
----
-
-## 🤝 Contributing
-
-We welcome contributions! Here's how:
-
-1. Fork the repo
-2. Create a branch (`git checkout -b feature/my-fix`)
-3. Commit changes (`git commit -m 'Add feature'`)
-4. Push (`git push origin feature/my-fix`)
-5. Open a Pull Request
-
-All contributions follow the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
+- **CLI** (`src/packages/cli`) — command surface, talks to the backend over HTTP.
+- **Core** (`src/packages/core/vera`) — scanner, code fixer, describe (Vision), PR
+  reporter, LLM bridge, FastAPI app.
+- **Dashboard** (`src/packages/dashboard`) — optional React UI.
 
 ---
 
-## 📄 License
+## License
 
-MIT — see [LICENSE](LICENSE) for details.
-
----
-
-## 💡 Final Tips
-
-- Use `vera clean` to reset project configuration
-- Back up `.verarc.json` when switching environments
-- The dashboard's "Fix Preview" shows AI-generated code before applying
-- Combine with Web Accessibility Inspector tools for best results
-- Check out [WCAG 2.2 Guidelines](https://www.w3.org/WAI/WCAG22/quickref/) for standards reference
-
-**Vera is live. Build inclusive apps at scale.** 🚀
+MIT — see [LICENSE](LICENSE).
