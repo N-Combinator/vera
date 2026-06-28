@@ -21,8 +21,10 @@ Out of MVP scope (skipped gracefully, never crash): data: URIs, CSS backgrounds,
 from __future__ import annotations
 
 import base64
+import ipaddress
 import logging
 import re
+import socket
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional
@@ -257,6 +259,34 @@ def is_in_scope_src(src: str) -> bool:
     return True
 
 
+def remote_fetch_blocked(url: str) -> Optional[str]:
+    """Return a reason string if fetching ``url`` is unsafe, else None (security S1).
+
+    Blocks Server-Side Request Forgery: only http(s), and the host must not resolve
+    to a private / loopback / link-local / reserved address (e.g. 127.0.0.1,
+    10.x, 192.168.x, 169.254.169.254 cloud metadata)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return f"scheme not allowed: {parsed.scheme!r}"
+    host = parsed.hostname
+    if not host:
+        return "no host"
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except Exception as e:
+        return f"DNS resolution failed: {e}"
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            return f"unparseable address: {addr}"
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return f"blocked internal address: {addr}"
+    return None
+
+
 # ── Image loading ──────────────────────────────────────────────────────────────
 
 class LoadedImage(BaseModel):
@@ -289,8 +319,12 @@ class ImageLoader:
             try:
                 if self._http_get is not None:
                     return self._http_get(src)
+                blocked = remote_fetch_blocked(src)
+                if blocked:
+                    logger.warning(f"[describe] refused SSRF-unsafe fetch {src}: {blocked}")
+                    return None
                 import httpx
-                resp = httpx.get(src, timeout=self._timeout, follow_redirects=True)
+                resp = httpx.get(src, timeout=self._timeout, follow_redirects=False)
                 resp.raise_for_status()
                 return resp.content
             except Exception as e:
@@ -300,7 +334,13 @@ class ImageLoader:
         try:
             p = Path(src)
             if not p.is_absolute() and base_dir is not None:
-                p = base_dir / src
+                # Jail relative srcs under base_dir: `../../etc/passwd` must not
+                # escape the scanned directory (security S4).
+                root = base_dir.resolve()
+                p = (base_dir / src).resolve()
+                if root != p and root not in p.parents:
+                    logger.warning(f"[describe] refused path traversal outside base: {src}")
+                    return None
             if not p.exists():
                 logger.warning(f"[describe] local image not found: {p}")
                 return None

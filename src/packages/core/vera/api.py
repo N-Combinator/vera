@@ -4,16 +4,14 @@ Endpoints: /scan, /fix, /health, /report/{scan_id}
 """
 
 from __future__ import annotations
-import asyncio
-import json
+import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import Depends, FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from .config_loader import load_config
 from .llm_bridge import LLMBridge
@@ -41,6 +39,34 @@ _llm: Optional[LLMBridge] = None
 _config = None
 
 
+# ── Security (S3) ─────────────────────────────────────────────────────────────
+# Optional bearer token. If VERA_API_TOKEN is set, the mutating/LLM endpoints
+# (/scan, /fix, /describe) require `Authorization: Bearer <token>`. Unset keeps
+# the tool open for trusted localhost use (prior behaviour, now opt-out).
+_API_TOKEN = os.getenv("VERA_API_TOKEN")
+
+
+def require_auth(authorization: Optional[str] = Header(default=None)) -> None:
+    if not _API_TOKEN:
+        return
+    expected = f"Bearer {_API_TOKEN}"
+    if not authorization or not hmac.compare_digest(authorization, expected):
+        raise HTTPException(status_code=401, detail="Missing or invalid API token")
+
+
+def _cors_origins() -> List[str]:
+    """Allowed CORS origins. Defaults to local dev hosts only — a wildcard with
+    credentials is forbidden by the CORS spec and exposes the API if ever bound
+    beyond localhost. Override with VERA_CORS_ORIGINS (comma-separated)."""
+    raw = os.getenv("VERA_CORS_ORIGINS")
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    return [
+        "http://localhost:5173", "http://127.0.0.1:5173",
+        "http://localhost:8000", "http://127.0.0.1:8000",
+    ]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _llm, _config
@@ -64,10 +90,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_origins = _cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restrict in production
-    allow_credentials=True,
+    allow_origins=_origins,
+    allow_credentials="*" not in _origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -91,16 +118,23 @@ async def health():
     )
 
 
-@app.post("/scan", response_model=ScanResult)
+@app.post("/scan", response_model=ScanResult, dependencies=[Depends(require_auth)])
 async def scan(req: ScanRequest):
     global _llm, _config
 
-    # Allow per-request LLM override
-    cfg = load_config() if _config is None else _config
+    # Work on a per-request copy so a `rules` filter never leaks into the shared
+    # global config used by later requests (C3).
+    base_cfg = load_config() if _config is None else _config
+    cfg = base_cfg.model_copy(deep=True)
+
+    # Allow per-request LLM override. A bridge we create here owns its httpx
+    # client and must be closed, or the connection pool leaks (C4).
+    own_llm = False
     if req.llm_provider:
         from .models import LLMConfig
         custom_llm_cfg = LLMConfig(provider=req.llm_provider, model=cfg.llm.model)
         llm = LLMBridge(custom_llm_cfg) if req.use_llm else None
+        own_llm = llm is not None
     else:
         llm = _llm if req.use_llm else None
 
@@ -113,6 +147,9 @@ async def scan(req: ScanRequest):
     except Exception as e:
         logger.error(f"[API] Scan failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
+    finally:
+        if own_llm and llm is not None:
+            await llm.close()
 
     # Cache result
     _scan_cache[result.scan_id] = result
@@ -123,7 +160,7 @@ async def scan(req: ScanRequest):
     return result
 
 
-@app.post("/fix", response_model=FixResponse)
+@app.post("/fix", response_model=FixResponse, dependencies=[Depends(require_auth)])
 async def fix(req: FixRequest):
     global _llm
 
@@ -148,6 +185,7 @@ async def fix(req: FixRequest):
             scan_result=scan_result,
             violation_ids=req.violation_ids,
             dry_run=req.dry_run,
+            root=os.getenv("VERA_FIX_ROOT"),
         )
     except Exception as e:
         logger.error(f"[API] Fix failed: {e}", exc_info=True)
@@ -186,7 +224,7 @@ async def list_reports():
 
 # ── Vera-Describe (opt-in alt-text quality module) ────────────────────────────
 
-@app.post("/describe")
+@app.post("/describe", dependencies=[Depends(require_auth)])
 async def describe(req: dict):
     """Opt-in AI alt-text review (WCAG 1.1.1). Suggest-only; never writes files.
 
@@ -227,9 +265,11 @@ async def describe(req: dict):
 
 if __name__ == "__main__":
     import uvicorn
+    # Bind localhost by default (S3). Set HOST=0.0.0.0 deliberately to expose,
+    # and set VERA_API_TOKEN when you do.
     uvicorn.run(
         "vera.api:app",
-        host="0.0.0.0",
+        host=os.getenv("HOST", "127.0.0.1"),
         port=int(os.getenv("PORT", "8000")),
         reload=os.getenv("VERA_DEV", "0") == "1",
         log_level="info",
