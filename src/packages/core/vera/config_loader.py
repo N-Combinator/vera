@@ -9,6 +9,15 @@ from pathlib import Path
 from typing import Optional
 from .models import VeraConfig, LLMConfig
 
+# Load a local .env so `cp .env.example .env` works for plain `uvicorn` runs too,
+# not only docker-compose. find_dotenv walks up from the CWD, and real environment
+# variables always win (override=False), so this never clobbers an explicit export.
+try:
+    from dotenv import load_dotenv, find_dotenv
+    load_dotenv(find_dotenv(usecwd=True), override=False)
+except ImportError:
+    pass
+
 
 DEFAULT_CONFIG_NAMES = [".verarc.json", ".verarc", "vera.config.json"]
 
