@@ -77,6 +77,39 @@ files and posts inline comments on the PR:
 
 ---
 
+## LLM setup
+
+Vera defaults to **Ollama** (local, private). Pick a provider with `VERA_LLM_PROVIDER`
+(`ollama` · `anthropic` · `openai` · `openrouter`) and a model with `VERA_LLM_MODEL`.
+Each setting is an env var or a field in `.verarc.json` — env vars win.
+
+**Cloud (Anthropic / OpenAI / OpenRouter)** — set the provider and an API key:
+
+```bash
+export VERA_LLM_PROVIDER=anthropic
+export VERA_LLM_MODEL=claude-sonnet-4-6
+export ANTHROPIC_API_KEY=sk-ant-...      # or OPENROUTER_API_KEY / OPENAI_API_KEY,
+                                         # or the generic VERA_API_KEY for any provider
+```
+
+Or put it in `.verarc.json` (created by `vera init`):
+
+```json
+{ "llm": { "provider": "anthropic", "model": "claude-sonnet-4-6", "api_key": "sk-ant-..." } }
+```
+
+**Local (Ollama)** — point Vera at your Ollama server (defaults shown):
+
+```bash
+export VERA_LLM_PROVIDER=ollama
+export VERA_LLM_MODEL=llama3
+export VERA_LLM_ENDPOINT=http://localhost:11434   # remote host? put its address here
+```
+
+> Running in Docker? `docker-compose` reads these from a repo-root `.env` file.
+
+---
+
 ## Rules (WCAG 2.2)
 
 Detected by fast heuristics (no LLM needed):
@@ -103,6 +136,7 @@ on your machine:
 
 - **Writes stay in the project.** `/fix` only writes inside the scanned directory; set
   `VERA_FIX_ROOT` to pin the allowed root explicitly. It can't overwrite files elsewhere.
+  (`VERA_FIX_ROOT` is an env var, set like the others — e.g. `export VERA_FIX_ROOT=./src`.)
 - **No internal network fetches.** When `describe` resolves image URLs, it refuses
   addresses that point at private, loopback, link-local, or cloud-metadata IPs — so a
   crafted page can't make Vera reach internal endpoints.

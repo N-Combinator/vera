@@ -21,6 +21,8 @@ services:
       VERA_LLM_MODEL: ${VERA_LLM_MODEL:-llama3}
       VERA_LLM_ENDPOINT: ${VERA_LLM_ENDPOINT:-http://host.docker.internal:11434}
       VERA_API_KEY: ${VERA_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       # Mount working directory so vera can scan host files

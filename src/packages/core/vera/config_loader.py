@@ -51,7 +51,13 @@ def load_config(config_path: Optional[str] = None) -> VeraConfig:
         provider=os.getenv("VERA_LLM_PROVIDER", llm_raw.get("provider", "ollama")),
         model=os.getenv("VERA_LLM_MODEL", llm_raw.get("model", "llama3")),
         endpoint=os.getenv("VERA_LLM_ENDPOINT", llm_raw.get("endpoint", "http://localhost:11434")),
-        api_key=os.getenv("VERA_API_KEY") or os.getenv("OPENAI_API_KEY") or llm_raw.get("api_key"),
+        api_key=(
+            os.getenv("VERA_API_KEY")
+            or os.getenv("ANTHROPIC_API_KEY")
+            or os.getenv("OPENROUTER_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+            or llm_raw.get("api_key")
+        ),
         timeout=int(os.getenv("VERA_LLM_TIMEOUT", str(llm_raw.get("timeout", 60)))),
         temperature=float(llm_raw.get("temperature", 0.1)),
         max_tokens=int(llm_raw.get("max_tokens", 2048)),
