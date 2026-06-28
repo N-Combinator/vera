@@ -96,6 +96,19 @@ when an LLM pass is enabled (no standalone heuristic yet).
 
 ---
 
+## Safe by default
+
+Vera is a local developer tool, and two guards keep it from doing anything surprising
+on your machine:
+
+- **Writes stay in the project.** `/fix` only writes inside the scanned directory; set
+  `VERA_FIX_ROOT` to pin the allowed root explicitly. It can't overwrite files elsewhere.
+- **No internal network fetches.** When `describe` resolves image URLs, it refuses
+  addresses that point at private, loopback, link-local, or cloud-metadata IPs — so a
+  crafted page can't make Vera reach internal endpoints.
+
+---
+
 ## Architecture
 
 ```
