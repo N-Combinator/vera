@@ -63,6 +63,16 @@ WCAG_MAP: Dict[str, str] = {
 
 _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 
+# Rules that require an LLM — the heuristic pass never emits these.
+# They appear in WCAG_MAP and the rule registry so the LLM can return them,
+# but they have no static detector: colour contrast needs real luminance math,
+# keyboard-trap and focusable-hidden need runtime focus-order analysis.
+LLM_ONLY_RULES: Set[str] = {
+    RuleId.COLOR_CONTRAST,
+    RuleId.KEYBOARD_TRAP,
+    RuleId.FOCUSABLE_HIDDEN,
+}
+
 
 # ── Parsed element tree ───────────────────────────────────────────────────────
 
@@ -366,6 +376,15 @@ class Scanner:
 
         llm_available = self.llm and await self.llm.is_available()
         llm_provider = self.config.llm.provider if llm_available else None
+
+        # Warn when LLM-only rules are requested but no LLM is configured (D1/D2).
+        if not llm_available and self.config.rules:
+            blind = LLM_ONLY_RULES & set(self.config.rules)
+            if blind:
+                logger.warning(
+                    f"[Scanner] Rules {blind} require an LLM but none is configured — "
+                    "these rules will produce no findings without --llm."
+                )
 
         logger.info(f"[Scanner] Scanning {len(files)} files in {target} | LLM: {llm_provider or 'disabled'}")
 

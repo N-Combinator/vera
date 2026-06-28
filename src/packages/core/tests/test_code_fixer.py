@@ -181,3 +181,35 @@ def test_missing_label_multiline_tag():
     out = fixer.fix(_violation(RuleId.MISSING_LABEL, 1), content)
     assert out is not None
     assert 'aria-label="Multi line"' in out
+
+
+# ── Security: write root jail (S2) ────────────────────────────────────────────
+# (_within_root / _resolve_root units are covered in test_security.py; this is the
+# end-to-end check that fix_scan actually refuses to write outside the root.)
+
+import asyncio
+from vera.code_fixer import CodeFixer
+from vera.models import ScanResult
+
+
+def test_fix_scan_refuses_file_outside_root(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    outside = tmp_path / "outside.html"
+    outside.write_text('<img src="a.png">')
+    before = outside.read_text()
+
+    v = _violation(RuleId.MISSING_ALT, 1, element='<img src="a.png">', file=str(outside))
+    scan = ScanResult(target=str(root), violations=[v])
+
+    resp = asyncio.run(CodeFixer().fix_scan(scan, violation_ids=None, root=str(root)))
+    assert resp.fixes_applied == 0
+    assert any("outside root" in e for e in resp.errors)
+    assert outside.read_text() == before      # untouched on disk
+
+
+def test_missing_label_skips_when_label_for_exists():
+    # #30: a <label for="id"> elsewhere already names this control —
+    # adding aria-label would be redundant (and double-names it).
+    content = '<label for="email">Email</label>\n<input type="text" id="email" name="email">'
+    assert fixer.fix(_violation(RuleId.MISSING_LABEL, 1), content) is None

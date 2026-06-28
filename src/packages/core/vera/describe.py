@@ -71,6 +71,8 @@ class ImageRef(BaseModel):
     in_figure: bool = False
     figcaption: Optional[str] = None
     nearby_text: str = ""
+    width_attr: Optional[int] = None    # numeric width="" / height="" if present
+    height_attr: Optional[int] = None
 
 
 class AltEvaluation(BaseModel):
@@ -160,6 +162,17 @@ def _parse_attrs(tag: str) -> dict:
     return attrs
 
 
+def _int_attr(value: Optional[str]) -> Optional[int]:
+    """Parse a numeric width/height attribute (``"1"``, ``"600"``, ``"600px"``) to an
+    int, or None for missing / non-numeric / JSX-expression values."""
+    if not value:
+        return None
+    v = value.strip().lower()
+    if v.endswith("px"):
+        v = v[:-2].strip()
+    return int(v) if v.isdigit() else None
+
+
 def _enclosed(content: str, pos: int, open_re: re.Pattern, close_re: re.Pattern) -> bool:
     """True if `pos` sits inside the nearest open/close pair of the given element."""
     last_open = None
@@ -184,6 +197,8 @@ def extract_images(content: str, filepath: str = "unknown") -> List[ImageRef]:
 
         aria_hidden = attrs.get("aria-hidden", "").lower() in ("true", "{true}")
         role = attrs.get("role")
+        w_attr = _int_attr(attrs.get("width"))
+        h_attr = _int_attr(attrs.get("height"))
 
         in_fig = _enclosed(content, m.start(), _FIGURE_OPEN_RE, _FIGURE_CLOSE_RE)
         figcap = None
@@ -212,6 +227,8 @@ def extract_images(content: str, filepath: str = "unknown") -> List[ImageRef]:
             in_figure=in_fig,
             figcaption=figcap,
             nearby_text=nearby,
+            width_attr=w_attr,
+            height_attr=h_attr,
         ))
     return refs
 
@@ -222,6 +239,24 @@ def extract_images(content: str, filepath: str = "unknown") -> List[ImageRef]:
 # NOT decorative. False "informative" wastes a vision call; false "decorative"
 # would hide real content from screen-reader users — so when unsure we lean
 # informative, but explicit decoration markers always win.
+
+# Filename / alt / caption tokens that mark an image as a chart or diagram. Broader
+# than the original 6 so data graphics that never spell out "chart"/"graph" — a
+# `revenue-dashboard.png`, a `histogram.svg`, a `q2-barchart` — are still caught (#20).
+_COMPLEX_KEYWORDS = (
+    "chart", "graph", "diagram", "plot", "infographic", "map",
+    "histogram", "dashboard", "viz", "visualization", "visualisation",
+    "flowchart", "flow-chart", "timeline", "heatmap", "scatter",
+    "piechart", "pie-chart", "barchart", "bar-chart", "schema",
+    "gantt", "treemap", "sankey", "boxplot", "candlestick",
+)
+
+
+def _src_path(src: str) -> str:
+    """The path part of a src, lower-cased and without query/fragment, for
+    extension/keyword checks (`a/b/chart.svg?v=2#x` → `a/b/chart.svg`)."""
+    return src.split("#", 1)[0].split("?", 1)[0].lower()
+
 
 def classify_role(img: ImageRef) -> ImageRole:
     # Explicit decoration markers — authoritative, never described.
@@ -234,13 +269,24 @@ def classify_role(img: ImageRef) -> ImageRole:
     if img.has_alt_attr and img.alt == "":
         return ImageRole.DECORATIVE
 
+    # Tracking pixels (1×1 beacons, e.g. the Facebook/Google noscript <img>) carry no
+    # content; flagging them for alt text is noise (#22). A 0/1-px image is never
+    # informative — treat as decorative regardless of where it sits.
+    if (img.width_attr is not None and img.width_attr <= 1
+            and img.height_attr is not None and img.height_attr <= 1):
+        return ImageRole.DECORATIVE
+
     # Functional: the image IS the label of a link/button.
     if img.in_link_or_button:
         return ImageRole.FUNCTIONAL
 
-    # Complex: charts/diagrams need a short alt + a long description.
+    # Complex: charts/diagrams need a short alt + a long description (#20).
     haystack = f"{img.src} {img.alt or ''} {img.figcaption or ''}".lower()
-    if any(k in haystack for k in ("chart", "graph", "diagram", "plot", "infographic", "map")):
+    if any(k in haystack for k in _COMPLEX_KEYWORDS):
+        return ImageRole.COMPLEX
+    # No keyword, but a captioned vector graphic in a <figure> is almost always a
+    # diagram/chart rather than a photo — those need a long description too.
+    if img.in_figure and img.figcaption and _src_path(img.src).endswith(".svg"):
         return ImageRole.COMPLEX
 
     return ImageRole.INFORMATIVE
@@ -494,9 +540,13 @@ async def describe_content(
     loader: ImageLoader,
     evaluator: Optional[VisionEvaluator],
     base_dir: Optional[Path] = None,
+    base_url: Optional[str] = None,
 ) -> List[AltEvaluation]:
     """Evaluate every <img> in one piece of content. Pure orchestration —
-    extraction → classify → (skip decorative/out-of-scope) → load → vision."""
+    extraction → classify → (skip decorative/out-of-scope) → load → vision.
+
+    ``base_url`` (set for remote pages) resolves relative srcs — `images/x.png`
+    on a fetched page becomes an absolute URL so it can actually be loaded (#21)."""
     out: List[AltEvaluation] = []
     for img in extract_images(content, filepath):
         role = classify_role(img)
@@ -517,7 +567,14 @@ async def describe_content(
             ))
             continue
 
-        loaded = loader.load(img.src, base_dir)
+        # Resolve a relative src against the page URL (#21). Absolute URLs already
+        # carry a scheme and pass through urljoin unchanged; protocol-relative
+        # `//cdn/x.png` inherits the page scheme. (data:/JSX are filtered above.)
+        load_src = img.src
+        if base_url and not urlparse(img.src).scheme:
+            load_src = urljoin(base_url, img.src)
+
+        loaded = loader.load(load_src, base_dir)
         if loaded is None:
             # Could not fetch the pixels. We still know whether alt is absent.
             verdict = AltVerdict.MISSING if not (img.has_alt_attr and img.alt) else AltVerdict.SKIPPED
@@ -543,6 +600,17 @@ async def describe_content(
 # ── Top-level entry point ──────────────────────────────────────────────────────
 
 _DESCRIBE_EXTENSIONS = {".html", ".htm", ".jsx", ".tsx", ".vue"}
+
+_BASE_HREF_RE = re.compile(r"<base\b[^>]*\bhref\s*=\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
+
+
+def _page_base_url(page_url: str, content: str) -> str:
+    """The base for resolving relative srcs on a fetched page: a `<base href>` if the
+    document declares one (resolved against the page URL), otherwise the page URL (#21)."""
+    m = _BASE_HREF_RE.search(content)
+    if m:
+        return urljoin(page_url, m.group(1))
+    return page_url
 
 
 def _build_default_evaluator(api_key: Optional[str], model: Optional[str]):
@@ -590,8 +658,10 @@ async def run_describe(
         except Exception as e:
             logger.error(f"[describe] could not fetch page {target}: {e}")
             return report
+        base_url = _page_base_url(target, content)
         evals = await describe_content(content, target, loader=loader,
-                                       evaluator=evaluator, base_dir=None)
+                                       evaluator=evaluator, base_dir=None,
+                                       base_url=base_url)
         report.evaluations.extend(evals)
         report.images_found = len(extract_images(content, target))
         return report

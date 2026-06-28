@@ -129,3 +129,24 @@ def test_dedupe_keeps_distinct_lineless_violations():
     ]
     out = Scanner._dedupe(vs)
     assert len(out) == 2  # distinct findings with no location must both survive
+
+
+# ── honesty: heuristic pass must not claim LLM-only rules (D1/D2) ──────────────
+
+from vera.scanner import LLM_ONLY_RULES
+
+
+def test_heuristic_never_emits_llm_only_rules():
+    samples = [
+        '<img src="a.png">',
+        '<div onclick="go()">x</div>',
+        '<input type="text">',
+        '<h1></h1>',
+        '<button></button>',
+        '<a href="#" style="color:#aaa;background:#bbb">low contrast text</a>',
+    ]
+    emitted = set()
+    for s in samples:
+        emitted |= set(_rules(s))
+    # color-contrast / keyboard-trap / focusable-hidden have no static detector.
+    assert not (emitted & LLM_ONLY_RULES)

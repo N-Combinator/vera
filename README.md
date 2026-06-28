@@ -96,6 +96,21 @@ when an LLM pass is enabled (no standalone heuristic yet).
 
 ---
 
+## Security
+
+The backend is a developer tool that reads and writes local files, so it binds to
+**`127.0.0.1` by default**. If you expose it, lock it down:
+
+| Concern | Control |
+|---------|---------|
+| Network exposure | Binds localhost; set `HOST=0.0.0.0` only deliberately. |
+| Authentication | Set `VERA_API_TOKEN`; `/scan`, `/fix`, `/describe` then require `Authorization: Bearer <token>`. |
+| CORS | Defaults to local dev origins (no wildcard-with-credentials). Override with `VERA_CORS_ORIGINS` (comma-separated). |
+| Arbitrary writes | `/fix` is jailed to the scan directory; set `VERA_FIX_ROOT` to pin it explicitly. |
+| SSRF | `describe` refuses image URLs that resolve to private / loopback / link-local / cloud-metadata addresses. |
+
+---
+
 ## Architecture
 
 ```

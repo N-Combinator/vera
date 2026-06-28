@@ -14,6 +14,7 @@ from vera.describe import (
     describe_content,
     extract_images,
     is_in_scope_src,
+    _page_base_url,
 )
 
 
@@ -279,3 +280,102 @@ def test_fixture_multiline_banner_found():
     ev = VisionEvaluator(_fake_vision('{"verdict":"missing"}'))
     res = asyncio.run(describe_content(_load_fixture(), "fix.html", loader=loader, evaluator=ev))
     assert any("banner.png" in e.src for e in res)
+
+
+# ── Security: local path traversal (S4) ──────────────────────────────────────
+# (SSRF / remote_fetch_blocked is covered in test_security.py.)
+
+def test_local_load_refuses_path_traversal(tmp_path):
+    secret = tmp_path / "secret.png"
+    secret.write_bytes(_png_bytes())
+    base = tmp_path / "site"
+    base.mkdir()
+    loader = ImageLoader()
+    # ../secret.png escapes base/ — must be refused even though the file exists.
+    assert loader.load("../secret.png", base_dir=base) is None
+
+
+def test_local_load_allows_within_base(tmp_path):
+    base = tmp_path / "site"
+    (base / "img").mkdir(parents=True)
+    (base / "img" / "ok.png").write_bytes(_png_bytes())
+    loader = ImageLoader()
+    assert loader.load("img/ok.png", base_dir=base) is not None
+
+
+# ── #22: tracking pixels are decorative, never flagged ────────────────────────
+
+def test_tracking_pixel_1x1_is_decorative():
+    img = extract_images(
+        '<img height="1" width="1" src="https://www.facebook.com/tr?id=1&noscript=1">'
+    )[0]
+    assert classify_role(img) == ImageRole.DECORATIVE
+
+
+def test_zero_size_pixel_is_decorative():
+    img = extract_images('<img src="https://t.example.com/p.gif" width="0" height="0">')[0]
+    assert classify_role(img) == ImageRole.DECORATIVE
+
+
+def test_normal_sized_image_not_treated_as_pixel():
+    img = extract_images('<img src="photo.png" width="640" height="480">')[0]
+    assert classify_role(img) == ImageRole.INFORMATIVE
+
+
+# ── #20: charts/diagrams without the literal word "chart"/"graph" ─────────────
+
+def test_complex_detected_without_chart_keyword():
+    for src in ("revenue-dashboard.png", "q2-barchart.png",
+                "sales-histogram.svg", "user-flowchart.png"):
+        img = extract_images(f'<img src="{src}">')[0]
+        assert classify_role(img) == ImageRole.COMPLEX, src
+
+
+def test_captioned_svg_figure_is_complex():
+    content = ('<figure><img src="metrics.svg">'
+               '<figcaption>Latency over time</figcaption></figure>')
+    img = extract_images(content)[0]
+    assert classify_role(img) == ImageRole.COMPLEX
+
+
+def test_plain_photo_still_informative():
+    img = extract_images('<img src="team.jpg">')[0]
+    assert classify_role(img) == ImageRole.INFORMATIVE
+
+
+# ── #21: relative srcs on a remote page resolve against the page URL ──────────
+
+def test_relative_src_resolved_against_page_url():
+    captured = {}
+
+    def fake_get(url):
+        captured["url"] = url
+        return _png_bytes()
+
+    loader = ImageLoader(http_get=fake_get)
+    ev = VisionEvaluator(_fake_vision('{"verdict":"pass","suggested_alt":"x"}'))
+    content = '<img src="img/logo.png" alt="Acme logo">'
+    asyncio.run(describe_content(
+        content, "https://acme.example/about/", loader=loader, evaluator=ev,
+        base_url="https://acme.example/about/",
+    ))
+    assert captured["url"] == "https://acme.example/about/img/logo.png"
+
+
+def test_base_href_overrides_page_url_for_resolution():
+    content = '<base href="https://cdn.example.com/assets/">'
+    assert _page_base_url("https://acme.example/x/", content) == "https://cdn.example.com/assets/"
+    # no <base> → fall back to the page url
+    assert _page_base_url("https://acme.example/x/", "<p>hi</p>") == "https://acme.example/x/"
+
+
+def test_absolute_src_not_rewritten_by_base_url():
+    captured = {}
+    loader = ImageLoader(http_get=lambda u: captured.setdefault("url", u) or _png_bytes())
+    ev = VisionEvaluator(_fake_vision('{"verdict":"pass"}'))
+    content = '<img src="https://other.cdn/x.png" alt="a">'
+    asyncio.run(describe_content(
+        content, "https://acme.example/", loader=loader, evaluator=ev,
+        base_url="https://acme.example/",
+    ))
+    assert captured["url"] == "https://other.cdn/x.png"

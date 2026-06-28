@@ -227,6 +227,14 @@ class RuleFixer:
         tag = content[s:e]
         if _has_attr(tag, "aria-label") or _has_attr(tag, "aria-labelledby") or _has_attr(tag, "title"):
             return None
+        # #30: if a <label for="id"> already exists in the document pointing to this
+        # input's id, the control has an accessible name — don't add a redundant aria-label.
+        existing_id = _get_attr(tag, "id")
+        if existing_id and re.search(
+            r'<label\b[^>]*\bfor\s*=\s*["\']' + re.escape(existing_id) + r'["\']',
+            content, re.IGNORECASE,
+        ):
+            return None
         label = self._derive_label(tag)
         if not label:
             return None  # no honest label source → leave for describe/human
