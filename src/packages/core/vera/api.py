@@ -4,13 +4,12 @@ Endpoints: /scan, /fix, /health, /report/{scan_id}
 """
 
 from __future__ import annotations
-import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config_loader import load_config
@@ -39,28 +38,9 @@ _llm: Optional[LLMBridge] = None
 _config = None
 
 
-# ── Security (S3) ─────────────────────────────────────────────────────────────
-# Optional bearer token. If VERA_API_TOKEN is set, the mutating/LLM endpoints
-# (/scan, /fix, /describe) require `Authorization: Bearer <token>`. Unset keeps
-# the tool open for trusted localhost use (prior behaviour, now opt-out).
-_API_TOKEN = os.getenv("VERA_API_TOKEN")
-
-
-def require_auth(authorization: Optional[str] = Header(default=None)) -> None:
-    if not _API_TOKEN:
-        return
-    expected = f"Bearer {_API_TOKEN}"
-    if not authorization or not hmac.compare_digest(authorization, expected):
-        raise HTTPException(status_code=401, detail="Missing or invalid API token")
-
-
 def _cors_origins() -> List[str]:
-    """Allowed CORS origins. Defaults to local dev hosts only — a wildcard with
-    credentials is forbidden by the CORS spec and exposes the API if ever bound
-    beyond localhost. Override with VERA_CORS_ORIGINS (comma-separated)."""
-    raw = os.getenv("VERA_CORS_ORIGINS")
-    if raw:
-        return [o.strip() for o in raw.split(",") if o.strip()]
+    """Allowed CORS origins — the local dashboard/dev hosts. Vera is a local
+    developer tool, so only loopback origins are permitted."""
     return [
         "http://localhost:5173", "http://127.0.0.1:5173",
         "http://localhost:8000", "http://127.0.0.1:8000",
@@ -90,11 +70,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-_origins = _cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_origins,
-    allow_credentials="*" not in _origins,
+    allow_origins=_cors_origins(),
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -118,7 +97,7 @@ async def health():
     )
 
 
-@app.post("/scan", response_model=ScanResult, dependencies=[Depends(require_auth)])
+@app.post("/scan", response_model=ScanResult)
 async def scan(req: ScanRequest):
     global _llm, _config
 
@@ -160,7 +139,7 @@ async def scan(req: ScanRequest):
     return result
 
 
-@app.post("/fix", response_model=FixResponse, dependencies=[Depends(require_auth)])
+@app.post("/fix", response_model=FixResponse)
 async def fix(req: FixRequest):
     global _llm
 
@@ -224,7 +203,7 @@ async def list_reports():
 
 # ── Vera-Describe (opt-in alt-text quality module) ────────────────────────────
 
-@app.post("/describe", dependencies=[Depends(require_auth)])
+@app.post("/describe")
 async def describe(req: dict):
     """Opt-in AI alt-text review (WCAG 1.1.1). Suggest-only; never writes files.
 
@@ -265,8 +244,7 @@ async def describe(req: dict):
 
 if __name__ == "__main__":
     import uvicorn
-    # Bind localhost by default (S3). Set HOST=0.0.0.0 deliberately to expose,
-    # and set VERA_API_TOKEN when you do.
+    # Vera is a local developer tool — bind loopback by default.
     uvicorn.run(
         "vera.api:app",
         host=os.getenv("HOST", "127.0.0.1"),

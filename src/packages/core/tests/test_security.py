@@ -1,4 +1,4 @@
-"""Security regression tests — S1 (SSRF), S2 (path traversal), S3 (auth), C3 (config isolation).
+"""Security regression tests — S1 (SSRF), S2 (path traversal), C3 (config isolation).
 
 These are pure-function / unit tests; no network calls, no API server running.
 """
@@ -111,56 +111,6 @@ def test_resolve_root_returns_parent_for_file():
 def test_resolve_root_none_for_empty():
     assert _resolve_root(None) is None
     assert _resolve_root("") is None
-
-
-# ── S3: API token auth (require_auth) ─────────────────────────────────────────
-
-def test_require_auth_passes_when_no_token_set(monkeypatch):
-    monkeypatch.delenv("VERA_API_TOKEN", raising=False)
-    # Re-import to pick up the env change
-    import importlib
-    import vera.api as api_mod
-    importlib.reload(api_mod)
-    # _API_TOKEN should be falsy — require_auth returns without raising
-    from fastapi import HTTPException
-    try:
-        api_mod.require_auth(authorization=None)
-    except HTTPException:
-        pytest.fail("require_auth raised when no token configured")
-
-
-def test_require_auth_blocks_missing_header(monkeypatch):
-    monkeypatch.setenv("VERA_API_TOKEN", "secret123")
-    import importlib
-    import vera.api as api_mod
-    importlib.reload(api_mod)
-    from fastapi import HTTPException
-    with pytest.raises(HTTPException) as exc:
-        api_mod.require_auth(authorization=None)
-    assert exc.value.status_code == 401
-
-
-def test_require_auth_blocks_wrong_token(monkeypatch):
-    monkeypatch.setenv("VERA_API_TOKEN", "secret123")
-    import importlib
-    import vera.api as api_mod
-    importlib.reload(api_mod)
-    from fastapi import HTTPException
-    with pytest.raises(HTTPException) as exc:
-        api_mod.require_auth(authorization="Bearer wrongtoken")
-    assert exc.value.status_code == 401
-
-
-def test_require_auth_passes_correct_token(monkeypatch):
-    monkeypatch.setenv("VERA_API_TOKEN", "secret123")
-    import importlib
-    import vera.api as api_mod
-    importlib.reload(api_mod)
-    from fastapi import HTTPException
-    try:
-        api_mod.require_auth(authorization="Bearer secret123")
-    except HTTPException:
-        pytest.fail("require_auth rejected a valid token")
 
 
 # ── C3: config isolation — per-request rules must not mutate the shared global ─

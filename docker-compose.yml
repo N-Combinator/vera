@@ -13,10 +13,9 @@ services:
       - "127.0.0.1:8000:8000"
     environment:
       # 0.0.0.0 is required so the port map reaches uvicorn inside the container;
-      # exposure is contained by the loopback-only port binding above + token.
+      # exposure is contained by the loopback-only port binding above.
       HOST: 0.0.0.0
       PORT: 8000
-      VERA_API_TOKEN: ${VERA_API_TOKEN:-}
       VERA_DEV: ${VERA_DEV:-0}
       VERA_LLM_PROVIDER: ${VERA_LLM_PROVIDER:-ollama}
       VERA_LLM_MODEL: ${VERA_LLM_MODEL:-llama3}
