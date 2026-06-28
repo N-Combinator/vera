@@ -44,6 +44,27 @@ vera --version
 
 ---
 
+## Configure
+
+Two ways to set up your LLM provider — pick whichever you prefer, both work:
+
+**Option 1 — interactive wizard:**
+
+```bash
+vera init   # asks for provider, model, etc. → saves .verarc.json
+```
+
+**Option 2 — manual:**
+
+```bash
+cp .env.example .env   # then open .env and uncomment your provider
+```
+
+> Cloud API keys always live in an env var (e.g. in `.env`) — for safety Vera never
+> writes keys to `.verarc.json`. Local Ollama needs no key.
+
+---
+
 ## Usage
 
 ```bash
@@ -74,12 +95,6 @@ files and posts inline comments on the PR:
     VERA_FAIL_ON_CRITICAL: "true"   # fail the check on critical issues
   run: python -m vera.pr_report
 ```
-
----
-
-## LLM setup
-
-Copy `.env.example` to `.env` and fill in your LLM provider.
 
 ---
 
