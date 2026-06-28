@@ -322,6 +322,24 @@ vera fix ./src --apply --yes
 vera fix ./src --apply --violations abc123,def456
 ```
 
+**Opt-in & safe by design.** `vera fix` is a **dry run by default** — it only previews
+the diff and writes nothing until you pass `--apply`. You stay in control of every change.
+
+**Fixes are correct, or they are not made.** The deterministic fixers never emit a
+plausible-but-harmful change; when a violation cannot be fixed correctly without human
+or AI judgement, it is left untouched (and surfaced for `vera describe`) rather than
+papered over:
+
+| Rule | What Vera does | What it deliberately avoids |
+|------|----------------|------------------------------|
+| `missing-label` | Derives the `aria-label` from the control's own `placeholder` → `title` → `name` (humanized). | Never writes a meaningless generic `aria-label="Field"`. Skips the control if no honest label source exists. |
+| `missing-alt` | Adds `alt=""` **only** for genuinely decorative images (tracking pixels, `role="presentation"`, `aria-hidden`). | Never marks an informative image decorative — that would *hide* it from screen readers. Informative images are deferred to `vera describe`, which suggests a real alt from the pixels. |
+| `label-associated` | Wires the `<label>` to its real control with a shared `id` (reusing the input's existing `id` when present). | Never emits a dangling `for="…"` that points at no element. Skips if no control can be resolved. |
+| `missing-role` / empty heading | Emits framework-correct output — `tabindex="0"` / HTML comments for HTML, `tabIndex={0}` / `{/* … */}` for JSX/TSX. | Never injects JSX-only syntax into plain HTML (or vice-versa). |
+
+All fixers are multi-line-tag safe: a tag spanning several lines is matched and fixed,
+not silently skipped.
+
 #### 6. Launch the Interactive Dashboard
 
 ```bash
