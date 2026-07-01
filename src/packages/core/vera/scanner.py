@@ -299,7 +299,7 @@ class HeuristicScanner:
     def _check_label_association(self, nodes: List[_Node], fp: str) -> List[Violation]:
         out = []
         for n in nodes:
-            if n.tag != "label" or n.has("for"):
+            if n.tag != "label" or n.has("for") or n.has("htmlfor"):
                 continue
             # OK if it wraps its control (implicit association).
             if any(d.tag in ("input", "select", "textarea") for d in n.descendants()):
