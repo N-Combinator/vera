@@ -1,120 +1,83 @@
 # Test Suite — Vera Accessibility Violations
 
-This folder contains intentionally inaccessible web applications for testing Vera's scanning and auto-fix capabilities.
+This folder contains intentionally inaccessible pages for testing Vera's scanning and
+auto-fix:
 
-## Files
+- `index.html` — a vanilla HTML page
+- `App.jsx` — a React component with roughly the same issues
 
-### `index.html`
-A vanilla HTML page with **11+ intentional accessibility violations**:
-- Missing alt text on images
-- Low color contrast (text on background)
-- Form inputs without labels
-- Non-semantic interactive elements (divs as buttons)
-- Empty headings
-- `aria-hidden` on visible content
-- Broken heading hierarchy
-- Icon buttons without `aria-label`
-- Focusable but hidden elements
-- Missing language attributes
+Each problem is marked with a `VIOLATION:` comment in the source. Not every planted issue
+is detected by Vera today — the sections below list what is and isn't.
 
-### `App.jsx`
-A React component with the same violations, suitable for testing Vera with React codebases.
+## What Vera detects
 
-## Running Vera on These Tests
-
-### Test HTML File
-```bash
-vera scan test/index.html
-```
-
-Expected output: **11 violations detected**
-
-### Test React Component
-```bash
-vera scan test/App.jsx
-```
-
-Expected output: **13 violations detected**
-
-## Auto-Fix Validation
-
-After scanning, test the auto-fix pipeline:
+### Heuristics only (no LLM)
 
 ```bash
-# Preview fixes (dry run)
-vera fix test/index.html
-
-# Apply fixes (with confirmation)
-vera fix test/index.html --apply
+vera scan test/index.html --no-llm   # 8 violations
+vera scan test/App.jsx --no-llm      # 8 violations
+vera scan test/ --no-llm             # 16 violations in 2 files
 ```
 
-## Violations Checklist
+Both files produce the same set:
 
-**Vera should detect:**
-- ✅ Missing `alt` text on `<img>` tags
-- ✅ Low color contrast (WCAG AA: 4.5:1 for normal text)
-- ✅ Form inputs without `<label>` or `aria-label`
-- ✅ Non-semantic interactive elements (e.g., `<div onclick>` instead of `<button>`)
-- ✅ Empty headings (`<h1></h1>`)
-- ✅ `aria-hidden="true"` on visible content
-- ✅ Broken heading hierarchy (h1 → h4 skip)
-- ✅ Icon buttons without accessible names
-- ✅ Focusable but visually hidden elements
-- ✅ Missing language attributes on language-specific content
+| Rule | Per file |
+|------|----------|
+| `missing-alt` | 3 |
+| `missing-label` | 3 |
+| `missing-role` | 1 |
+| `empty-heading` | 1 |
 
-## Expected Auto-Fixes
+For a JSON report: `vera scan test/ --no-llm -f json -o report.json`.
 
-Vera should generate code fixes for:
-1. **Add alt text** → `<img alt="description" />`
-2. **Increase contrast** → CSS color adjustment
-3. **Add labels** → `<label for="input-id">`
-4. **Semantic elements** → `<button>` instead of `<div onclick>`
-5. **Add aria-label** → `<button aria-label="Settings">⚙️</button>`
-6. **Remove aria-hidden** → Delete problematic attribute
-7. **Fix heading hierarchy** → Change `<h4>` to `<h2>` or `<h3>`
-8. **Add language attributes** → `<p lang="es">`
+### With an LLM enabled
 
----
+`color-contrast`, `keyboard-trap`, and `focusable-hidden` are checked only in the LLM pass,
+so `vera scan test/` without `--no-llm` can report more. The exact count depends on the
+model, so there's no fixed expected number.
 
-## Testing Workflow
+### Planted but not detected yet
 
-1. **Scan for violations:**
-   ```bash
-   vera scan test/
-   ```
+These are in the test files on purpose, but no heuristic rule covers them:
 
-2. **View detailed report:**
-   ```bash
-   vera scan test/ --output report.json
-   ```
+- `aria-hidden="true"` on visible content (`aria-hidden-body` only checks `<body>`)
+- skipped heading level (`<h1>` → `<h4>`)
+- icon buttons without an accessible name
+- `<div>`s used as navigation links or as a list
+- low color contrast (LLM pass only, see above)
 
-3. **Preview fixes:**
-   ```bash
-   vera fix test/ --preview
-   ```
+## Auto-fix
 
-4. **Apply fixes:**
-   ```bash
-   vera fix test/ --apply
-   ```
+```bash
+vera fix test/            # dry run: shows the patches, writes nothing
+vera fix test/ --apply    # writes them (asks for confirmation; add --yes to skip)
+```
 
-5. **Verify all fixed:**
-   ```bash
-   vera scan test/
-   # Should show 0 violations
-   ```
+With no LLM configured, `fix` makes 9 of the 16 changes and skips 7:
 
----
+| Rule | What `fix` does |
+|------|-----------------|
+| `missing-label` | adds `aria-label` from the input's `placeholder`, `title`, or `name`; skips an input that has none of them |
+| `missing-role` | adds `role="button"` and `tabindex="0"` (`tabIndex={0}` in JSX) |
+| `empty-heading` | inserts a `TODO: Add heading text` comment — the heading still needs real text |
+| `missing-alt` | skips: these product images are informative, and Vera never marks them decorative with `alt=""`. Use `vera describe` for alt-text suggestions |
 
-## Success Criteria
+After `--apply`, a second scan still reports **8 violations**. That's expected:
 
-Vera is working correctly if:
-- ✅ Scans detect **all violations** listed above
-- ✅ Generated fixes are **syntactically valid** (no broken code)
-- ✅ Fixed code passes **Vera's second scan** (0 violations)
-- ✅ Dashboard displays violations with correct severity levels
-- ✅ Code diffs show accurate before/after changes
+- 6 × `missing-alt` — informative images, left for `vera describe` or a human
+- 1 × `missing-label` in `index.html` — the hidden input has no `placeholder`, `title`, or
+  `name` to derive an honest label from
+- 1 × `empty-heading` in `index.html` — the inserted TODO comment isn't heading text
 
----
+If an LLM is configured, `fix` asks it for the changes the heuristics skip, so results vary.
 
-**Test Early. Test Often. Build Inclusive Apps.** 🚀
+## Success criteria
+
+With no LLM configured, Vera is working correctly if:
+
+- `vera scan test/ --no-llm` reports 16 violations (8 per file)
+- `vera fix test/` proposes 9 patches and skips 7
+- the patched files are still valid HTML / JSX
+- a rescan after `--apply` reports the 8 remaining violations listed above
+
+If you change the rules or the test files, update these numbers.
