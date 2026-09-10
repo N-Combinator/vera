@@ -1,8 +1,17 @@
-# Vera — AI-Powered Accessibility Auto-Remediator
+# Vera — Accessibility Checker for Frontend Code
 
-Vera scans web code (HTML, JSX/TSX, Vue) for WCAG 2.2 accessibility issues and helps you
-fix them — deterministic code patches, AI alt-text review via Claude Vision, and inline
-review comments in your pull requests.
+Vera scans frontend source code (HTML, JSX/TSX, Vue) for WCAG 2.2 accessibility issues and
+helps you fix them — deterministic code patches, inline review comments in your pull
+requests, and an optional AI alt-text review.
+
+**An LLM is optional, not required.** The core checks and fixes are plain heuristics and
+work with no model at all (`vera scan --no-llm`). Connecting a local or cloud LLM only adds
+extra checks and fills in fixes the heuristics can't make.
+
+**What Vera is not:** an overlay, or a tool that makes a site accessible on its own.
+Automated checks catch only part of real accessibility problems (roughly 30–40%); keyboard
+and screen-reader testing still matter. Vera takes the mechanical part off your plate,
+early — on your machine and in code review.
 
 ---
 
@@ -15,14 +24,16 @@ review comments in your pull requests.
 - **Describe** — Claude Vision grades each image's alt text against the actual pixels and
   suggests a real description (suggest-only, never writes).
 - **PR comments** — a GitHub Action posts findings as inline review comments on the diff.
-- **Local or cloud LLM** — Ollama (private) or OpenAI / Anthropic / OpenRouter.
+- **LLM optional** — runs without one; if you want extra checks, plug in Ollama (local,
+  private) or OpenAI / Anthropic / OpenRouter.
 - **Dashboard** — optional web UI for browsing issues and before/after diffs.
 
 ---
 
 ## Install
 
-Requires **Node.js 18+** and **Python 3.12+** (Docker optional).
+Requires **Node.js 18+** and **Python 3.12+** (Docker optional). Vera isn't published to
+npm yet, so the CLI is built from source.
 
 ```bash
 # 1. Build the CLI
@@ -45,6 +56,9 @@ vera --version
 ---
 
 ## Configure
+
+This step is optional. Skip it to run heuristics only (`vera scan --no-llm`); set up a
+provider only if you want the LLM-powered checks.
 
 Two ways to set up your LLM provider — pick whichever you prefer, both work:
 
