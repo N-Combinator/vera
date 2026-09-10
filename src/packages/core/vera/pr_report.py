@@ -17,7 +17,9 @@ Design notes grounded in the Vera audit:
 
 from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 # ── Diff position mapping ──────────────────────────────────────────────────────
@@ -125,29 +127,26 @@ class GitHubPRClient:
         resp.raise_for_status()
         return resp.json() if resp.content else {}
 
-    def get_pr_files(self, pr: int) -> List[dict]:
-        files, page = [], 1
+    def _get_all(self, path: str) -> List[dict]:
+        items, page = [], 1
         while True:
-            batch = self._request("GET", f"/repos/{self.repo}/pulls/{pr}/files?per_page=100&page={page}")
+            batch = self._request("GET", f"{path}?per_page=100&page={page}")
             if not batch:
                 break
-            files.extend(batch)
+            items.extend(batch)
             if len(batch) < 100:
                 break
             page += 1
-        return files
+        return items
+
+    def get_pr_files(self, pr: int) -> List[dict]:
+        return self._get_all(f"/repos/{self.repo}/pulls/{pr}/files")
 
     def get_review_comments(self, pr: int) -> List[dict]:
-        comments, page = [], 1
-        while True:
-            batch = self._request("GET", f"/repos/{self.repo}/pulls/{pr}/comments?per_page=100&page={page}")
-            if not batch:
-                break
-            comments.extend(batch)
-            if len(batch) < 100:
-                break
-            page += 1
-        return comments
+        return self._get_all(f"/repos/{self.repo}/pulls/{pr}/comments")
+
+    def get_reviews(self, pr: int) -> List[dict]:
+        return self._get_all(f"/repos/{self.repo}/pulls/{pr}/reviews")
 
     def create_review(self, pr: int, body: str, comments: List[dict], event: str = "COMMENT"):
         payload = {"body": body, "event": event}
@@ -162,7 +161,12 @@ _MARKER = "<!-- vera-a11y -->"   # identifies our comments for idempotent re-run
 
 
 def _normalize(path: str) -> str:
-    return path.lstrip("./").replace("\\", "/")
+    # Strip a leading "./" prefix. Not lstrip("./") — that strips characters and
+    # turned absolute paths into "home/runner/...".
+    path = path.replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    return path
 
 
 def _match_diff_file(vfile: str, diff_files: List[str]) -> Optional[str]:
@@ -174,7 +178,7 @@ def _match_diff_file(vfile: str, diff_files: List[str]) -> Optional[str]:
     nv = _normalize(vfile)
     if nv in diff_files:
         return nv
-    cands = [d for d in diff_files if nv.endswith(d) or d.endswith(nv)]
+    cands = [d for d in diff_files if nv.endswith("/" + d) or d.endswith("/" + nv)]
     return cands[0] if len(cands) == 1 else None
 
 
@@ -219,6 +223,7 @@ def build_review(
     inline: List[dict] = []
     summary: List[dict] = []
     seen_new: Set[str] = set()
+    already_commented = 0
 
     for v in violations:
         loc = v.get("location") or {}
@@ -229,14 +234,17 @@ def build_review(
         if target and line and diff_maps[target].is_commentable(line):
             pos = diff_maps[target].position_for(line)
             key = _comment_key(target, pos, v.get("rule", "?"))
-            if key in existing_keys or key in seen_new:
-                continue                      # already commented (or dup in batch)
+            if key in existing_keys:
+                already_commented += 1        # still counted, so a re-run's body matches
+                continue
+            if key in seen_new:
+                continue                      # duplicate within this batch
             seen_new.add(key)
             inline.append({"path": target, "position": pos, "body": format_comment(v)})
         else:
             summary.append(v)                 # not in diff / line=0 → summary
 
-    body = _render_summary(summary, inline_count=len(inline))
+    body = _render_summary(summary, inline_count=len(inline) + already_commented)
     return {
         "body": body,
         "comments": inline,
@@ -273,15 +281,65 @@ def _render_summary(summary: List[dict], inline_count: int) -> str:
 
 # ── Orchestration + GitHub Actions entry point ─────────────────────────────────
 
-async def _scan_violations(scan_path: str) -> List[dict]:
-    """Run Vera's scanner and return violations as plain dicts."""
-    from .config_loader import load_config
+def changed_scan_targets(
+    files: List[dict], repo_root: str, scan_path: str, ignore: Set[str]
+) -> List[str]:
+    """The PR's files worth scanning, as absolute paths: still present (not
+    removed), a type the scanner reads, inside ``scan_path``, and not under an
+    ignored directory (``node_modules``, test fixtures, ...)."""
+    from .scanner import SCANNABLE_EXTENSIONS
+
+    root = Path(repo_root).resolve()
+    scope = Path(scan_path).resolve()
+    targets: List[str] = []
+    for f in files:
+        if f.get("status") == "removed":
+            continue
+        rel = Path(f["filename"])
+        if any(part in ignore for part in rel.parts):
+            continue
+        path = (root / rel).resolve()
+        if path.suffix not in SCANNABLE_EXTENSIONS or not path.is_file():
+            continue
+        if path != scope and scope not in path.parents:
+            continue
+        targets.append(str(path))
+    return targets
+
+
+def _repo_relative(path: str, repo_root: str) -> str:
+    try:
+        return Path(path).resolve().relative_to(Path(repo_root).resolve()).as_posix()
+    except ValueError:
+        return path
+
+
+async def _scan_violations(targets: List[str], repo_root: str, cfg) -> List[dict]:
+    """Run Vera's scanner over ``targets`` and return violations as plain dicts,
+    with enum values ("serious") and repo-relative file paths."""
     from .scanner import Scanner
 
-    cfg = load_config()
     scanner = Scanner(config=cfg, llm=None)     # heuristics only in CI by default
-    result = await scanner.scan(scan_path)
-    return [v.model_dump() for v in result.violations]
+    violations: List[dict] = []
+    for target in targets:
+        result = await scanner.scan(target)
+        for v in result.violations:
+            d = v.model_dump(mode="json")
+            if d.get("location") and d["location"].get("file"):
+                d["location"]["file"] = _repo_relative(d["location"]["file"], repo_root)
+            violations.append(d)
+    return violations
+
+
+def _ignore_paths(cfg) -> Set[str]:
+    """Config ignore_paths plus comma-separated VERA_IGNORE_PATHS."""
+    extra = os.getenv("VERA_IGNORE_PATHS", "")
+    return set(cfg.ignore_paths) | {p.strip() for p in extra.split(",") if p.strip()}
+
+
+def _last_vera_review_body(reviews: List[dict]) -> Optional[str]:
+    bodies = [r.get("body") or "" for r in reviews if _MARKER in (r.get("body") or "")]
+    return bodies[-1] if bodies else None
 
 
 async def run(
@@ -290,26 +348,33 @@ async def run(
     pr_number: int,
     token: str,
     scan_path: str = ".",
+    repo_root: str = ".",
     client: Optional[GitHubPRClient] = None,
     violations: Optional[List[dict]] = None,
 ) -> dict:
-    """Scan, map findings onto the PR diff, and post a single review.
+    """Scan the files this PR changes, map findings onto its diff, and post a
+    single review.
 
     `client` and `violations` are injectable so the whole flow is unit-testable
     without GitHub or a real scan.
     """
     client = client or GitHubPRClient(token, repo)
-    if violations is None:
-        violations = await _scan_violations(scan_path)
-
     files = client.get_pr_files(pr_number)
+
+    if violations is None:
+        from .config_loader import load_config
+        cfg = load_config()
+        targets = changed_scan_targets(files, repo_root, scan_path, _ignore_paths(cfg))
+        violations = await _scan_violations(targets, repo_root, cfg)
+
     diff_maps = build_diff_maps(files)
     existing = client.get_review_comments(pr_number)
     review = build_review(violations, diff_maps, existing)
 
-    # Only call the API when there is something new to say (avoids empty reviews
-    # on every re-run once all findings are already commented).
-    if review["comments"] or review["summary_count"] or not existing:
+    # Post only when there's something new: inline comments not yet on the PR, or a
+    # summary that differs from the last one Vera posted. Re-runs stay silent.
+    last_body = _last_vera_review_body(client.get_reviews(pr_number))
+    if review["comments"] or review["body"] != last_body:
         client.create_review(pr_number, review["body"], review["comments"])
 
     review["violations"] = violations
@@ -348,14 +413,18 @@ def main() -> int:
     token = os.getenv("GITHUB_TOKEN")
     repo = os.getenv("GITHUB_REPOSITORY")      # "owner/name"
     scan_path = os.getenv("VERA_SCAN_PATH", ".")
+    repo_root = os.getenv("GITHUB_WORKSPACE", ".")
     pr_number = _pr_number_from_env()
 
     if not (token and repo and pr_number):
         log.error("[vera] need GITHUB_TOKEN, GITHUB_REPOSITORY and a PR context; skipping.")
         return 0                                # no-op on non-PR events
 
-    review = asyncio.run(run(repo=repo, pr_number=pr_number, token=token, scan_path=scan_path))
-    log.info(f"[vera] posted {review['inline_count']} inline + "
+    review = asyncio.run(run(
+        repo=repo, pr_number=pr_number, token=token,
+        scan_path=scan_path, repo_root=repo_root,
+    ))
+    log.info(f"[vera] {review['inline_count']} new inline + "
              f"{review['summary_count']} summary finding(s) on PR #{pr_number}")
 
     if os.getenv("VERA_FAIL_ON_CRITICAL", "").lower() in ("1", "true", "yes"):

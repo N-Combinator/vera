@@ -97,19 +97,22 @@ vera describe ./page.html      # AI alt-text review (needs ANTHROPIC_API_KEY)
 vera ui                        # launch the dashboard at :3000
 ```
 
-**`fix` is safe by design:** it's a dry run unless you pass `--apply`, and it only makes
-changes it can make *correctly* — e.g. it derives an input's label from its `placeholder`
+**`fix` is safe by design:** it's a dry run unless you pass `--apply`, `--apply` shows the
+patches and asks before writing anything, and it only makes changes it can make *correctly* — e.g. it derives an input's label from its `placeholder`
 rather than inventing a generic one, and never marks an informative image decorative.
 
 ### CI / pull requests
 
-A ready-made workflow lives at `.github/workflows/accessibility.yml`. It scans changed
-files and posts inline comments on the PR:
+A ready-made workflow lives at `.github/workflows/accessibility.yml`. It scans only the
+files a PR changes, comments inline on the lines the PR added, and lists the other findings
+in those files in one summary review — posted again only when the findings change:
 
 ```yaml
 - env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    VERA_FAIL_ON_CRITICAL: "true"   # fail the check on critical issues
+    VERA_SCAN_PATH: ${{ github.workspace }}/src   # only changed files under this path
+    VERA_IGNORE_PATHS: "fixtures"                 # comma-separated directories to skip
+    VERA_FAIL_ON_CRITICAL: "true"                 # fail the check on critical issues
   run: python -m vera.pr_report
 ```
 

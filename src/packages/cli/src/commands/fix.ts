@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import readline from "readline";
-import { createClient, Fix } from "../utils/api-client";
+import { createClient, Fix, FixRequest, FixResponse, VeraApiClient } from "../utils/api-client";
 import { loadConfig } from "../utils/config";
 
 // ── Fix Command ───────────────────────────────────────────────────────────────
@@ -29,25 +29,23 @@ export async function fixCommand(
   }
 
   const isDryRun = options.dryRun ?? !options.apply;
+  // Writing asks first: preview with a dry run, write only after a "y".
+  // --yes and --quiet skip the question and write straight away.
+  const confirmFirst = !isDryRun && !options.yes && !options.quiet;
 
   if (isDryRun && !options.quiet) {
     console.log("ℹ️  Dry run mode (no files will be changed). Use --apply to write fixes.\n");
   }
 
-  let response;
-  try {
-    response = await client.fix({
-      path: absPath,
-      scan_id: options.scanId,
-      violation_ids: options.violations?.split(",").map((v) => v.trim()),
-      dry_run: isDryRun,
-    });
-  } catch (err: any) {
-    console.error("❌ Fix failed:", err.message);
-    process.exit(1);
-  }
+  const request: FixRequest = {
+    path: absPath,
+    scan_id: options.scanId,
+    violation_ids: options.violations?.split(",").map((v) => v.trim()),
+  };
 
-  const { fixes, fixes_applied, fixes_skipped, errors } = response;
+  let response = await requestFix(client, { ...request, dry_run: isDryRun || confirmFirst });
+
+  const { fixes } = response;
   // AI suggestions are review-only: the backend never writes them to disk.
   const patches = fixes.filter((f) => !f.ai_generated);
   const suggestions = fixes.filter((f) => f.ai_generated);
@@ -70,14 +68,17 @@ export async function fixCommand(
     }
   }
 
-  // Confirm if --apply and not --yes
-  if (options.apply && !isDryRun && !options.yes && !options.quiet && patches.length > 0) {
+  // Nothing has been written yet — ask, then write
+  if (confirmFirst && patches.length > 0) {
     const confirmed = await confirmApply(patches.length);
     if (!confirmed) {
-      console.log("\n⏸  Fixes cancelled.\n");
+      console.log("\n⏸  Fixes cancelled. No files were changed.\n");
       return;
     }
+    response = await requestFix(client, { ...request, dry_run: false });
   }
+
+  const { fixes_applied, fixes_skipped, errors } = response;
 
   // Summary
   if (!options.quiet) {
@@ -100,6 +101,17 @@ export async function fixCommand(
     if (!isDryRun && fixes_applied > 0) {
       console.log(`\n💡 Run 'vera scan ${targetPath}' to verify.\n`);
     }
+  }
+}
+
+// ── Request ───────────────────────────────────────────────────────────────────
+
+async function requestFix(client: VeraApiClient, req: FixRequest): Promise<FixResponse> {
+  try {
+    return await client.fix(req);
+  } catch (err: any) {
+    console.error("❌ Fix failed:", err.message);
+    process.exit(1);
   }
 }
 
