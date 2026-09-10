@@ -1,0 +1,32 @@
+name: Tests
+
+# Runs the core test suite on every PR to main and on every push to main.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # same as the core Dockerfile
+          cache: pip
+          cache-dependency-path: src/packages/core/requirements.txt
+
+      - name: Install Vera core
+        working-directory: src/packages/core
+        run: pip install -r requirements.txt
+
+      # `python -m` puts src/packages/core on sys.path so tests can import `vera`
+      - name: Run tests
+        working-directory: src/packages/core
+        run: python -m pytest -q
