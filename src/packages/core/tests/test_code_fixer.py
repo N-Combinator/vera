@@ -213,3 +213,36 @@ def test_missing_label_skips_when_label_for_exists():
     # adding aria-label would be redundant (and double-names it).
     content = '<label for="email">Email</label>\n<input type="text" id="email" name="email">'
     assert fixer.fix(_violation(RuleId.MISSING_LABEL, 1), content) is None
+
+
+# ── LLM fallback is suggest-only: never written to disk ───────────────────────
+
+class _FakeLLM:
+    async def is_available(self):
+        return True
+
+    async def generate_fix(self, violation, code):
+        return code.replace("<img", '<img alt="LLM guess"')
+
+
+def test_llm_fix_is_suggested_not_written(tmp_path):
+    page = tmp_path / "page.html"
+    page.write_text('<img src="promo.png">\n<input type="text" placeholder="Search">')
+
+    violations = [
+        _violation(RuleId.MISSING_ALT, 1, file=str(page)),    # deterministic skips → LLM
+        _violation(RuleId.MISSING_LABEL, 2, file=str(page)),  # deterministic fix
+    ]
+    scan = ScanResult(target=str(tmp_path), violations=violations)
+
+    resp = asyncio.run(CodeFixer(llm=_FakeLLM()).fix_scan(scan, violation_ids=None, dry_run=False))
+
+    written = page.read_text()
+    assert 'aria-label="Search"' in written   # deterministic fix is applied
+    assert "LLM guess" not in written          # the AI suggestion is not
+    assert resp.fixes_applied == 1
+
+    suggestions = [f for f in resp.fixes if f.ai_generated]
+    assert len(suggestions) == 1
+    assert suggestions[0].applied is False
+    assert "LLM guess" in suggestions[0].fixed_code

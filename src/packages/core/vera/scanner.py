@@ -10,6 +10,7 @@ heading whose text lives in a child span) — the things regex got wrong (audit 
 
 from __future__ import annotations
 import logging
+import re
 import time
 import uuid
 from html.parser import HTMLParser
@@ -62,6 +63,10 @@ WCAG_MAP: Dict[str, str] = {
 }
 
 _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+
+# JSX comments render nothing, so they are not text content. html.parser sees them
+# as plain data; HTML comments already go to handle_comment and are ignored.
+_JSX_COMMENT_RE = re.compile(r"\{\s*/\*.*?\*/\s*\}", re.DOTALL)
 
 # Rules that require an LLM — the heuristic pass never emits these.
 # They appear in WCAG_MAP and the rule registry so the LLM can return them,
@@ -141,6 +146,7 @@ class _TreeBuilder(HTMLParser):
                 return
 
     def handle_data(self, data):
+        data = _JSX_COMMENT_RE.sub("", data)
         if data.strip():
             self.stack[-1].text += data
 

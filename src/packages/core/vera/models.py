@@ -77,6 +77,7 @@ class Fix(BaseModel):
     fixed_code: str
     description: str
     applied: bool = False
+    ai_generated: bool = False   # LLM suggestion: shown for review, never written
     diff: Optional[str] = None
 
 

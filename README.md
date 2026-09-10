@@ -6,7 +6,8 @@ requests, and an optional AI alt-text review.
 
 **An LLM is optional, not required.** The core checks and fixes are plain heuristics and
 work with no model at all (`vera scan --no-llm`). Connecting a local or cloud LLM only adds
-extra checks and fills in fixes the heuristics can't make.
+extra checks and suggests patches for what the heuristics skip — shown for review, never
+written to disk.
 
 **What Vera is not:** an overlay, or a tool that makes a site accessible on its own.
 Automated checks catch only part of real accessibility problems (roughly 30–40%); keyboard
@@ -20,7 +21,9 @@ early — on your machine and in code review.
 - **Scan** — fast heuristic checks for missing alt text, unlabeled inputs, duplicate IDs,
   empty headings, interactive elements without roles, and more.
 - **Fix** — safe, opt-in code patches. Dry-run by default; only writes with `--apply`. A
-  fixer that can't produce a correct change skips it rather than guessing.
+  fixer that can't produce a correct change skips it rather than guessing. With an LLM
+  configured, skipped violations also get an AI-suggested patch — for review only, never
+  written.
 - **Describe** — Claude Vision grades each image's alt text against the actual pixels and
   suggests a real description (suggest-only, never writes).
 - **PR comments** — a GitHub Action posts findings as inline review comments on the diff.
