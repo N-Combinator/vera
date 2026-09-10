@@ -48,6 +48,9 @@ export async function fixCommand(
   }
 
   const { fixes, fixes_applied, fixes_skipped, errors } = response;
+  // AI suggestions are review-only: the backend never writes them to disk.
+  const patches = fixes.filter((f) => !f.ai_generated);
+  const suggestions = fixes.filter((f) => f.ai_generated);
 
   if (fixes.length === 0) {
     console.log("✅ No fixable violations found.\n");
@@ -56,14 +59,20 @@ export async function fixCommand(
 
   // Show preview
   if (!options.quiet) {
-    for (const fix of fixes) {
+    for (const fix of patches) {
       printFixPreview(fix);
+    }
+    if (suggestions.length > 0) {
+      console.log("\n🤖 AI suggestions — not applied, review and copy by hand:");
+      for (const fix of suggestions) {
+        printFixPreview(fix);
+      }
     }
   }
 
   // Confirm if --apply and not --yes
-  if (options.apply && !isDryRun && !options.yes && !options.quiet) {
-    const confirmed = await confirmApply(fixes.length);
+  if (options.apply && !isDryRun && !options.yes && !options.quiet && patches.length > 0) {
+    const confirmed = await confirmApply(patches.length);
     if (!confirmed) {
       console.log("\n⏸  Fixes cancelled.\n");
       return;
@@ -74,10 +83,13 @@ export async function fixCommand(
   if (!options.quiet) {
     console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     if (isDryRun) {
-      console.log(`📋 Dry run: ${fixes.length} fix(es) would be applied`);
+      console.log(`📋 Dry run: ${patches.length} fix(es) would be applied`);
     } else {
       console.log(`✅ ${fixes_applied} fix(es) applied`);
       if (fixes_skipped > 0) console.log(`⏭  ${fixes_skipped} skipped`);
+    }
+    if (suggestions.length > 0) {
+      console.log(`🤖 ${suggestions.length} AI suggestion(s) shown above — not written to disk`);
     }
 
     if (errors.length > 0) {

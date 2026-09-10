@@ -46,6 +46,15 @@ def test_heading_with_img_alt_is_ok():
     assert "empty-heading" not in _rules('<h1><img src="logo.png" alt="Acme"></h1>')
 
 
+def test_heading_with_only_jsx_comment_is_empty():
+    # a JSX comment renders nothing — e.g. the TODO that `vera fix` inserts
+    assert "empty-heading" in _rules("<h3>{/* TODO: Add heading text */}</h3>", "Page.jsx")
+
+
+def test_heading_with_text_and_jsx_comment_is_ok():
+    assert "empty-heading" not in _rules("<h3>{/* note */}Pricing</h3>", "Page.jsx")
+
+
 # ── aria-hidden body ──────────────────────────────────────────────────────────
 
 def test_aria_hidden_body_flagged():

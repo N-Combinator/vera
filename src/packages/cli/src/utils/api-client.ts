@@ -50,6 +50,7 @@ export interface Fix {
   fixed_code: string;
   description: string;
   applied: boolean;
+  ai_generated?: boolean;  // LLM suggestion: shown for review, never written
   diff?: string;
 }
 

@@ -44,6 +44,7 @@ These are in the test files on purpose, but no heuristic rule covers them:
 - skipped heading level (`<h1>` → `<h4>`)
 - icon buttons without an accessible name
 - `<div>`s used as navigation links or as a list
+- foreign-language text without a `lang` attribute (`index.html`)
 - low color contrast (LLM pass only, see above)
 
 ## Auto-fix
@@ -59,17 +60,18 @@ With no LLM configured, `fix` makes 9 of the 16 changes and skips 7:
 |------|-----------------|
 | `missing-label` | adds `aria-label` from the input's `placeholder`, `title`, or `name`; skips an input that has none of them |
 | `missing-role` | adds `role="button"` and `tabindex="0"` (`tabIndex={0}` in JSX) |
-| `empty-heading` | inserts a `TODO: Add heading text` comment — the heading still needs real text |
+| `empty-heading` | inserts a `TODO: Add heading text` comment — the heading still needs real text, so the next scan flags it again |
 | `missing-alt` | skips: these product images are informative, and Vera never marks them decorative with `alt=""`. Use `vera describe` for alt-text suggestions |
 
-After `--apply`, a second scan still reports **8 violations**. That's expected:
+After `--apply`, a second scan still reports **9 violations**. That's expected:
 
 - 6 × `missing-alt` — informative images, left for `vera describe` or a human
+- 2 × `empty-heading` — the inserted TODO comment (HTML or JSX) isn't heading text
 - 1 × `missing-label` in `index.html` — the hidden input has no `placeholder`, `title`, or
   `name` to derive an honest label from
-- 1 × `empty-heading` in `index.html` — the inserted TODO comment isn't heading text
 
-If an LLM is configured, `fix` asks it for the changes the heuristics skip, so results vary.
+If an LLM is configured, `fix` also shows AI-suggested patches for what it skipped. They're
+for review only and are never written to disk.
 
 ## Success criteria
 
@@ -78,6 +80,6 @@ With no LLM configured, Vera is working correctly if:
 - `vera scan test/ --no-llm` reports 16 violations (8 per file)
 - `vera fix test/` proposes 9 patches and skips 7
 - the patched files are still valid HTML / JSX
-- a rescan after `--apply` reports the 8 remaining violations listed above
+- a rescan after `--apply` reports the 9 remaining violations listed above
 
 If you change the rules or the test files, update these numbers.

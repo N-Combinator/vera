@@ -4,8 +4,9 @@ Vera — Code Fixer: applies accessibility fixes to source files.
 Deterministic, standards-aware fixes. The guiding rule is *never emit a fix that
 is wrong* — a fixer that cannot produce a correct, WCAG-valid result for a given
 violation returns ``None`` (the violation is left for ``vera describe`` or a human)
-rather than writing a plausible-but-harmful change. Optional LLM-generated fixes
-fill the gaps when a bridge is configured.
+rather than writing a plausible-but-harmful change. When an LLM bridge is
+configured it is asked about the skipped violations too, but nothing can check its
+patches for correctness, so they are returned as suggestions and never written.
 """
 
 from __future__ import annotations
@@ -402,26 +403,16 @@ class CodeFixer:
                 for violation in file_violations:
                     original_snippet = self._extract_snippet(current_content, violation)
 
-                    # Try deterministic fix first
+                    # Only deterministic fixes are ever written
                     fixed_content = self.rule_fixer.fix(violation, current_content)
-
-                    # Fall back to LLM fix if available and deterministic failed
-                    if fixed_content is None and self.llm:
-                        try:
-                            llm_available = await self.llm.is_available()
-                            if llm_available:
-                                fixed_snippet = await self.llm.generate_fix(
-                                    violation, original_snippet
-                                )
-                                if fixed_snippet and fixed_snippet != original_snippet:
-                                    fixed_content = current_content.replace(
-                                        original_snippet, fixed_snippet, 1
-                                    )
-                        except Exception as e:
-                            logger.warning(f"[Fixer] LLM fix failed: {e}")
 
                     if fixed_content is None or fixed_content == current_content:
                         skipped_count += 1
+                        suggestion = await self._suggest_llm_fix(
+                            violation, filepath, path.name, current_content, original_snippet
+                        )
+                        if suggestion:
+                            all_fixes.append(suggestion)
                         continue
 
                     diff = generate_diff(current_content, fixed_content, path.name)
@@ -452,6 +443,38 @@ class CodeFixer:
             fixes_skipped=skipped_count,
             fixes=all_fixes,
             errors=errors,
+        )
+
+    async def _suggest_llm_fix(
+        self,
+        violation: Violation,
+        filepath: str,
+        filename: str,
+        content: str,
+        snippet: str,
+    ) -> Optional[Fix]:
+        """Ask the LLM for a patch the deterministic fixer skipped. Suggest-only:
+        the result is shown for review and never written to disk."""
+        if not self.llm:
+            return None
+        try:
+            if not await self.llm.is_available():
+                return None
+            fixed_snippet = await self.llm.generate_fix(violation, snippet)
+        except Exception as e:
+            logger.warning(f"[Fixer] LLM fix failed: {e}")
+            return None
+        if not fixed_snippet or fixed_snippet == snippet:
+            return None
+        return Fix(
+            violation_id=violation.id,
+            file=filepath,
+            original_code=snippet,
+            fixed_code=fixed_snippet,
+            description=f"AI suggestion for: {violation.description}",
+            applied=False,
+            ai_generated=True,
+            diff=generate_diff(content, content.replace(snippet, fixed_snippet, 1), filename),
         )
 
     def _extract_snippet(self, content: str, violation: Violation, context_lines: int = 3) -> str:
