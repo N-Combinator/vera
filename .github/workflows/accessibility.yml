@@ -29,6 +29,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
+          # Only files changed by the PR are scanned, and only under this path.
           VERA_SCAN_PATH: ${{ github.workspace }}/src
+          # Intentionally inaccessible test pages aren't reviewed.
+          VERA_IGNORE_PATHS: "fixtures"
           VERA_FAIL_ON_CRITICAL: "true"
         run: python -m vera.pr_report

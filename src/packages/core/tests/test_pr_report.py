@@ -176,6 +176,14 @@ def test_reporter_path_normalization():
     assert review["inline_count"] == 1     # leading ./ normalized
 
 
+def test_reporter_absolute_path_matches_on_boundary():
+    maps = build_diff_maps(DIFF_FILES)
+    ci_path = "/home/runner/work/vera/vera/src/App.jsx"
+    assert build_review([_viol("missing-alt", ci_path, 12)], maps)["inline_count"] == 1
+    # a suffix that isn't a whole path segment must not match
+    assert build_review([_viol("missing-alt", "/repo/mysrc/App.jsx", 12)], maps)["inline_count"] == 0
+
+
 def test_reporter_clean_pr_message():
     maps = build_diff_maps(DIFF_FILES)
     review = build_review([], maps)
@@ -188,9 +196,10 @@ import asyncio
 
 
 class FakeClient:
-    def __init__(self, files, existing=None):
+    def __init__(self, files, existing=None, reviews=None):
         self._files = files
         self._existing = existing or []
+        self._reviews = reviews or []
         self.posted = None
 
     def get_pr_files(self, pr):
@@ -198,6 +207,9 @@ class FakeClient:
 
     def get_review_comments(self, pr):
         return self._existing
+
+    def get_reviews(self, pr):
+        return self._reviews
 
     def create_review(self, pr, body, comments, event="COMMENT"):
         self.posted = {"pr": pr, "body": body, "comments": comments}
@@ -222,16 +234,62 @@ def test_run_posts_inline_and_summary():
 
 
 def test_run_rerun_is_idempotent():
-    # Existing comment already covers the only inline finding → nothing new posted.
-    existing = [{
-        "path": "src/App.jsx", "position": 8,
-        "body": format_comment(_viol("missing-alt", "src/App.jsx", 12)),
-    }]
-    client = FakeClient(DIFF_FILES, existing=existing)
-    review = asyncio.run(run(
-        repo="org/vera", pr_number=7, token="t",
-        client=client, violations=[_viol("missing-alt", "src/App.jsx", 12)],
-    ))
+    # Second run on an unchanged PR: the inline comment and the summary review from
+    # the first run are already there → nothing new is posted.
+    violations = [
+        _viol("missing-alt", "src/App.jsx", 12),    # inline
+        _viol("color-contrast", "src/App.jsx", 0),  # summary
+    ]
+    first = FakeClient(DIFF_FILES)
+    asyncio.run(run(repo="org/vera", pr_number=7, token="t", client=first, violations=violations))
+
+    second = FakeClient(
+        DIFF_FILES,
+        existing=first.posted["comments"],
+        reviews=[{"body": first.posted["body"]}],
+    )
+    review = asyncio.run(run(repo="org/vera", pr_number=7, token="t", client=second, violations=violations))
     assert review["inline_count"] == 0
-    # No summary findings + comment already exists → no new review posted.
-    assert client.posted is None
+    assert second.posted is None
+
+
+def test_run_reposts_when_findings_change():
+    first = FakeClient(DIFF_FILES)
+    asyncio.run(run(repo="org/vera", pr_number=7, token="t", client=first,
+                    violations=[_viol("color-contrast", "src/App.jsx", 0)]))
+
+    second = FakeClient(DIFF_FILES, reviews=[{"body": first.posted["body"]}])
+    asyncio.run(run(repo="org/vera", pr_number=7, token="t", client=second, violations=[
+        _viol("color-contrast", "src/App.jsx", 0),
+        _viol("missing-alt", "src/App.jsx", 4),     # new off-diff finding
+    ]))
+    assert second.posted is not None
+
+
+def test_run_scans_only_changed_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("VERA_IGNORE_PATHS", "fixtures")
+    src = tmp_path / "src"
+    (src / "fixtures").mkdir(parents=True)
+    (tmp_path / "test").mkdir()
+    (src / "App.jsx").write_text('<img src="a.png" />\n')
+    (src / "Other.jsx").write_text('<img src="b.png" />\n')             # not in the PR
+    (src / "fixtures" / "page.html").write_text('<img src="c.png">\n')  # ignored dir
+    (tmp_path / "test" / "page.html").write_text('<img src="d.png">\n') # outside scan_path
+
+    added = '@@ -0,0 +1 @@\n+<img src="x.png" />'
+    files = [
+        {"filename": "src/App.jsx", "status": "added", "patch": added},
+        {"filename": "src/fixtures/page.html", "status": "added", "patch": added},
+        {"filename": "test/page.html", "status": "added", "patch": added},
+        {"filename": "src/Gone.jsx", "status": "removed", "patch": "@@ -1 +0,0 @@\n-<img>"},
+    ]
+    client = FakeClient(files)
+    review = asyncio.run(run(
+        repo="org/vera", pr_number=7, token="t", client=client,
+        scan_path=str(src), repo_root=str(tmp_path),
+    ))
+
+    assert [v["location"]["file"] for v in review["violations"]] == ["src/App.jsx"]
+    assert review["violations"][0]["severity"] == "serious"   # plain value, not an enum
+    assert client.posted["comments"][0]["path"] == "src/App.jsx"
+    assert "(serious)" in client.posted["comments"][0]["body"]
